@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Renacer",
+    "slug": "renacer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splashBackgroundColor": "#1B263B",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.renacer.app"
+    },
+    "android": {
+      "package": "com.renacer.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "renacer"
+      }
+    }
+  }
+}
