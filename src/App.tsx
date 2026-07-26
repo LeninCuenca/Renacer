@@ -1,87 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-
-// ============================================================
-// Tipos
-// ============================================================
-interface Cliente {
-  id: number
-  nombre: string
-  cedula: string
-  telefono?: string | null
-  created_at?: string
-}
-
-interface Item {
-  id?: number
-  marca?: string | null
-  n_serie?: string | null
-  media?: string | null
-  diseno?: string | null
-  cantidad: number
-  valor_unitario: number
-  rechazo: boolean
-  observaciones: string
-  fecha_ingreso?: string | null
-}
-
-type EstadoOrden = 'Recepcion' | 'Envio a fabrica' | 'Retorno de fabrica' | 'En bodega' | 'Entregado al cliente'
-type TipoPago = 'Contado' | 'Diferido en efectivo' | 'Credito 30 dias' | 'Credito 60 dias' | 'Credito 90 dias' | 'Cheque' | 'Transferencia'
-
-interface Orden {
-  id: number
-  numero: string
-  cliente_id: number
-  cliente_nombre?: string | null
-  estado: EstadoOrden
-  fecha_rc?: string | null
-  fecha_ef?: string | null
-  fecha_rf?: string | null
-  fecha_bodega?: string | null
-  fecha_ec?: string | null
-  tipo_pago?: string | null
-  monto_total: number
-  monto_abonado: number
-  monto_pendiente: number
-  pagado_completo: boolean
-  activo_vigente: boolean
-  observaciones: string
-  created_at?: string | null
-  items: Item[]
-}
-
-interface ResumenReporte {
-  anio: number
-  mes: number
-  total_ordenes: number
-  total_cantidad: number
-  promedio_rc_rf_horas: number | null
-  promedio_ef_rf_horas: number | null
-  promedio_rc_ec_horas: number | null
-}
-
-const ESTADOS: EstadoOrden[] = ['Recepcion', 'Envio a fabrica', 'Retorno de fabrica', 'En bodega', 'Entregado al cliente']
-const TIPOS_PAGO: TipoPago[] = ['Contado', 'Diferido en efectivo', 'Credito 30 dias', 'Credito 60 dias', 'Credito 90 dias', 'Cheque', 'Transferencia']
-
-const API_BASE = '/api'
-
-// ============================================================
-// API helper
-// ============================================================
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
-  if (!res.ok) {
-    let msg = `Error ${res.status}`
-    try { const j = await res.json(); msg = j.detail || msg } catch { /* noop */ }
-    throw new Error(msg)
-  }
-  if (res.headers.get('content-type')?.includes('application/json')) {
-    return res.json()
-  }
-  return undefined as T
-}
+import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
+import { ESTADOS, TIPOS_PAGO } from './types'
+import { mockApi } from './mockApi'
 
 // ============================================================
 // App principal
@@ -151,7 +71,6 @@ function TabBtn({ label, active, onClick }: { label: string; active: boolean; on
 function ClientesScreen() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [nombre, setNombre] = useState('')
   const [cedula, setCedula] = useState('')
@@ -161,13 +80,12 @@ function ClientesScreen() {
 
   const cargar = useCallback(async () => {
     try {
-      const data = await api<Cliente[]>('/clientes')
+      const data = await mockApi.getClientes()
       setClientes(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
@@ -177,10 +95,7 @@ function ClientesScreen() {
     if (!nombre.trim() || !cedula.trim()) { setError('Nombre y cedula son obligatorios'); return }
     setSaving(true); setError(null)
     try {
-      await api('/clientes', {
-        method: 'POST',
-        body: JSON.stringify({ nombre, cedula, telefono: telefono || null }),
-      })
+      await mockApi.createCliente({ nombre, cedula, telefono: telefono || null })
       setNombre(''); setCedula(''); setTelefono('')
       setShowForm(false)
       cargar()
@@ -217,11 +132,6 @@ function ClientesScreen() {
         </div>
       )}
 
-      <button onClick={() => { setRefreshing(true); cargar() }}
-        className="text-xs font-semibold text-navy-300 hover:text-navy-500">
-        {refreshing ? 'Actualizando...' : '↻ Refrescar'}
-      </button>
-
       {clientes.length === 0 ? (
         <EmptyState text="No hay clientes registrados" />
       ) : (
@@ -256,7 +166,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
   }
 
   useEffect(() => {
-    api<Cliente[]>('/clientes').then(setClientes).catch(() => {})
+    mockApi.getClientes().then(setClientes).catch(() => {})
   }, [])
 
   const updateItem = (idx: number, campo: keyof Item, valor: string | boolean | number) => {
@@ -272,17 +182,14 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
     if (!clienteId || !numero.trim()) { setError('Seleccione cliente e ingrese numero de orden'); return }
     setSaving(true); setError(null)
     try {
-      await api('/ordenes', {
-        method: 'POST',
-        body: JSON.stringify({
-          numero, cliente_id: clienteId, observaciones,
-          items: items.map(it => ({
-            marca: it.marca || null, n_serie: it.n_serie || null,
-            media: it.media || null, diseno: it.diseno || null,
-            cantidad: it.cantidad, valor_unitario: it.valor_unitario,
-            rechazo: it.rechazo, observaciones: it.observaciones,
-          })),
-        }),
+      await mockApi.createOrden({
+        numero, cliente_id: clienteId, observaciones,
+        items: items.map(it => ({
+          marca: it.marca || null, n_serie: it.n_serie || null,
+          media: it.media || null, diseno: it.diseno || null,
+          cantidad: it.cantidad, valor_unitario: it.valor_unitario,
+          rechazo: it.rechazo, observaciones: it.observaciones,
+        })),
       })
       onCreated()
     } catch (e) {
@@ -310,7 +217,6 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
             <option value={0}>Seleccione...</option>
             {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre} — {c.cedula}</option>)}
           </select>
-          {clientes.length === 0 && <p className="mt-1.5 text-xs text-orange-600">Primero cree un cliente en la pestana Clientes</p>}
         </div>
         <Input label="Numero de orden *" value={numero} onChange={setNumero} placeholder="OT-0001" />
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
@@ -371,19 +277,17 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
 function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
   const [ordenes, setOrdenes] = useState<Orden[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<Orden | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
-      const data = await api<Orden[]>('/ordenes')
+      const data = await mockApi.getOrdenes()
       setOrdenes(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
@@ -395,10 +299,7 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-navy-500">Ordenes de Trabajo</h2>
-        <button onClick={() => { setRefreshing(true); cargar() }}
-          className="text-xs font-semibold text-navy-300 hover:text-navy-500">
-          {refreshing ? 'Actualizando...' : '↻ Refrescar'}
-        </button>
+        <button onClick={cargar} className="text-xs font-semibold text-navy-300 hover:text-navy-500">↻ Refrescar</button>
       </div>
 
       {error && <ErrorBox message={error} onClose={() => setError(null)} />}
@@ -441,7 +342,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
 
   const cambiarEstado = async (estado: EstadoOrden) => {
     try {
-      await api(`/ordenes/${orden.id}/estado`, { method: 'PATCH', body: JSON.stringify({ estado }) })
+      await mockApi.cambiarEstado(orden.id, estado)
       setMsg(`Estado cambiado a: ${estado}`)
       onClose()
     } catch (e) {
@@ -454,7 +355,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
     if (!monto || monto <= 0) { setMsg('Ingrese un monto valido'); return }
     setSaving(true)
     try {
-      await api(`/ordenes/${orden.id}/abonos`, { method: 'POST', body: JSON.stringify({ monto }) })
+      await mockApi.registrarAbono(orden.id, monto)
       setAbonoMonto('')
       setMsg(`Abono de $${monto.toFixed(2)} registrado`)
       onClose()
@@ -468,7 +369,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
   const definirPago = async () => {
     if (!tipoPago) return
     try {
-      await api(`/ordenes/${orden.id}/pago`, { method: 'POST', body: JSON.stringify({ tipo_pago: tipoPago }) })
+      await mockApi.definirPago(orden.id, tipoPago as TipoPago)
       setMsg(`Tipo de pago: ${tipoPago}`)
       onClose()
     } catch (e) {
@@ -607,7 +508,7 @@ function ReporteScreen() {
   const cargarResumen = async () => {
     setLoading(true); setError(null)
     try {
-      const data = await api<ResumenReporte>(`/reportes/resumen?anio=${anio}&mes=${mes}`)
+      const data = await mockApi.getResumen(anio, mes)
       setResumen(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar resumen')
@@ -619,7 +520,7 @@ function ReporteScreen() {
   useEffect(() => { cargarResumen() }, [])
 
   const descargarExcel = () => {
-    window.open(`${API_BASE}/reportes/mensual?anio=${anio}&mes=${mes}`, '_blank')
+    mockApi.downloadExcel(anio, mes)
   }
 
   return (
@@ -712,7 +613,7 @@ function Input({
 function LoadingView() {
   return (
     <div className="flex flex-col items-center justify-center py-20">
-      <div className="h-8 w-8 animate-spin rounded-full border-3 border-primary-200 border-t-primary-400" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-400" />
       <p className="mt-3 text-sm text-navy-300">Cargando...</p>
     </div>
   )
