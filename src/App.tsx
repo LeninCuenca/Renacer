@@ -205,28 +205,54 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
   const [clienteId, setClienteId] = useState<number>(0)
   const [numero, setNumero] = useState('')
   const [observaciones, setObservaciones] = useState('')
-  const [items, setItems] = useState<Item[]>([nuevoItem()])
+  const [items, setItems] = useState<Item[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [listaAbierta, setListaAbierta] = useState(false)
 
-  function nuevoItem(): Item {
-    return { marca: '', n_serie: '', media: '', diseno: '', cantidad: 1, valor_unitario: 0, rechazo: false, observaciones: '' }
-  }
+  // Campos del formulario temporal
+  const [fMarca, setFMarca] = useState('')
+  const [fSerie, setFSerie] = useState('')
+  const [fMedia, setFMedia] = useState('')
+  const [fDiseno, setFDiseno] = useState('')
+  const [fCantidad, setFCantidad] = useState(1)
+  const [fValor, setFValor] = useState(0)
+  const [fObs, setFObs] = useState('')
+  const [fRechazo, setFRechazo] = useState(false)
 
   useEffect(() => { mockApi.getClientes().then(setClientes).catch(() => {}) }, [])
 
-  const updateItem = (idx: number, campo: keyof Item, valor: string | boolean | number) => {
-    setItems(prev => prev.map((it, i) => i === idx ? { ...it, [campo]: valor } : it))
+  const limpiarFormulario = () => {
+    setFMarca(''); setFSerie(''); setFMedia(''); setFDiseno('')
+    setFCantidad(1); setFValor(0); setFObs(''); setFRechazo(false)
   }
 
-  const agregarItem = () => setItems(prev => [...prev, nuevoItem()])
+  const agregarLlanta = () => {
+    if (!fMarca.trim() && !fMedia) { setError('Ingrese al menos la marca o la medida'); return }
+    const nuevo: Item = {
+      marca: fMarca || null, n_serie: fSerie || null,
+      media: fMedia || null, diseno: fDiseno || null,
+      cantidad: fCantidad, valor_unitario: fValor,
+      rechazo: fRechazo, observaciones: fObs,
+    }
+    setItems(prev => [...prev, nuevo])
+    limpiarFormulario()
+    setListaAbierta(true)
+    setError(null)
+  }
+
   const quitarItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx))
+
+  const toggleRechazo = (idx: number) => {
+    setItems(prev => prev.map((it, i) => i === idx ? { ...it, rechazo: !it.rechazo } : it))
+  }
 
   const totalEstimado = items.filter(it => !it.rechazo).reduce((sum, it) => sum + it.cantidad * it.valor_unitario, 0)
   const totalRechazado = items.filter(it => it.rechazo).reduce((sum, it) => sum + it.cantidad * it.valor_unitario, 0)
 
   const guardar = async () => {
     if (!clienteId || !numero.trim()) { setError('Seleccione cliente e ingrese numero de orden'); return }
+    if (items.length === 0) { setError('Agregue al menos una llanta'); return }
     setSaving(true); setError(null)
     try {
       await mockApi.createOrden({
@@ -268,131 +294,136 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
       </section>
 
-      {/* Items — una tarjeta por llanta */}
+      {/* Formulario para agregar una llanta */}
       <section className="rounded-xl border border-navy-100 bg-white shadow-sm">
-        {/* Cabecera de la sección */}
-        <div className="flex items-center justify-between border-b border-navy-100 px-5 py-4">
+        <div className="border-b border-navy-100 px-5 py-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-navy-500">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-400 text-xs font-bold text-navy-500">2</span>
-            Items / Llantas
-            <span className="ml-1 rounded-full bg-navy-100 px-2 py-0.5 text-xs font-bold text-navy-400">{items.length}</span>
+            Registrar llanta
           </h3>
-          <button onClick={agregarItem}
-            className="flex items-center gap-1.5 rounded-lg bg-navy-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-navy-600 active:scale-95">
+          <p className="mt-1 text-xs text-navy-300">Llene los datos y toque "Agregar llanta" para anadirla a la lista.</p>
+        </div>
+
+        <div className="space-y-2.5 p-5">
+          <div className="grid grid-cols-2 gap-2">
+            <ItemField label="Marca">
+              <input value={fMarca} onChange={e => setFMarca(e.target.value)} placeholder="Ej: Michelin" className="item-input" />
+            </ItemField>
+            <ItemField label="N° Serie">
+              <input value={fSerie} onChange={e => setFSerie(e.target.value)} placeholder="Ej: SN-0001" className="item-input" />
+            </ItemField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <ItemField label="Medida">
+              <select value={fMedia} onChange={e => setFMedia(e.target.value)} className="item-input">
+                <option value="">Seleccionar...</option>
+                {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </ItemField>
+            <ItemField label="Diseño">
+              <input value={fDiseno} onChange={e => setFDiseno(e.target.value)} placeholder="Ej: Rayado" className="item-input" />
+            </ItemField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <ItemField label="Cantidad">
+              <input type="number" min="1" value={String(fCantidad)} onChange={e => setFCantidad(parseInt(e.target.value) || 1)} className="item-input" />
+            </ItemField>
+            <ItemField label="Valor unitario ($)">
+              <input type="number" min="0" step="0.01" value={String(fValor)} onChange={e => setFValor(parseFloat(e.target.value) || 0)} className="item-input" />
+            </ItemField>
+          </div>
+          <ItemField label="Observaciones">
+            <input value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Notas sobre esta llanta..." className="item-input" />
+          </ItemField>
+
+          <button onClick={() => setFRechazo(!fRechazo)}
+            className={`flex w-full items-center justify-center gap-2 rounded-lg border py-2 text-xs font-bold transition ${
+              fRechazo
+                ? 'border-red-200 bg-red-100 text-red-700 hover:bg-red-50'
+                : 'border-navy-100 bg-navy-50 text-navy-400 hover:border-red-200 hover:text-red-500'
+            }`}>
+            {fRechazo ? '✓ Marcada como rechazada — toca para quitar' : 'Marcar como rechazada (no se cobra)'}
+          </button>
+
+          <button onClick={agregarLlanta}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-navy-600 active:scale-95">
             <span className="text-base leading-none">+</span> Agregar llanta
           </button>
         </div>
+      </section>
 
-        {/* Lista de tarjetas */}
-        <div className="divide-y divide-navy-50">
-          {items.map((it, idx) => {
-            const subtotal = it.cantidad * it.valor_unitario
-            return (
-              <div key={idx} className={`px-5 py-4 transition-colors ${it.rechazo ? 'bg-red-50/60' : 'bg-white'}`}>
-                {/* Fila superior: numero de item, subtotal, botón eliminar */}
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 text-xs font-extrabold text-navy-500">
-                      {idx + 1}
-                    </span>
-                    {it.rechazo && (
-                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-600">
-                        Rechazada
-                      </span>
-                    )}
+      {/* Lista desplegable de llantas agregadas */}
+      {items.length > 0 && (
+        <section className="rounded-xl border border-navy-100 bg-white shadow-sm">
+          <button onClick={() => setListaAbierta(!listaAbierta)}
+            className="flex w-full items-center justify-between px-5 py-4">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-navy-500">Llantas agregadas</h3>
+              <span className="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-bold text-navy-500">{items.length}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
+              <span className={`text-navy-300 transition-transform ${listaAbierta ? 'rotate-180' : ''}`}>
+                <ChevronIcon />
+              </span>
+            </div>
+          </button>
+
+          {listaAbierta && (
+            <div className="divide-y divide-navy-50 border-t border-navy-100">
+              {items.map((it, idx) => {
+                const subtotal = it.cantidad * it.valor_unitario
+                return (
+                  <div key={idx} className={`px-5 py-3 ${it.rechazo ? 'bg-red-50/50' : ''}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy-100 text-[10px] font-extrabold text-navy-500">
+                          {idx + 1}
+                        </span>
+                        <div>
+                          <p className={`text-sm font-bold ${it.rechazo ? 'text-red-400 line-through' : 'text-navy-500'}`}>
+                            {it.cantidad}x {it.marca || 'Sin marca'} — {it.media || 'S/M'}
+                          </p>
+                          <p className="text-xs text-navy-300">
+                            {it.n_serie ? `Serie: ${it.n_serie} · ` : ''}{it.diseno ? `Diseño: ${it.diseno}` : ''}
+                          </p>
+                          {it.observaciones && <p className="text-xs text-navy-300">Obs: {it.observaciones}</p>}
+                          {it.rechazo && <span className="mt-1 inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">RECHAZADA</span>}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className={`text-sm font-bold ${it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}`}>${subtotal.toFixed(2)}</span>
+                        <button onClick={() => toggleRechazo(idx)}
+                          className={`rounded px-2 py-1 text-[10px] font-bold transition ${it.rechazo ? 'bg-green-100 text-green-700 hover:bg-green-50' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}>
+                          {it.rechazo ? 'Activar' : 'Rechazar'}
+                        </button>
+                        <button onClick={() => quitarItem(idx)}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-navy-200 transition hover:bg-red-50 hover:text-red-500">
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-base font-extrabold ${it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}`}>
-                      ${subtotal.toFixed(2)}
-                    </span>
-                    {items.length > 1 && (
-                      <button onClick={() => quitarItem(idx)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full text-navy-200 transition hover:bg-red-50 hover:text-red-500">
-                        <TrashIcon />
-                      </button>
-                    )}
+                )
+              })}
+
+              {/* Totales */}
+              <div className="space-y-1 bg-navy-50/50 px-5 py-4">
+                {totalRechazado > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-red-400">Rechazado (no se cobra):</span>
+                    <span className="font-bold text-red-400 line-through">${totalRechazado.toFixed(2)}</span>
                   </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-navy-400">Total a cobrar:</span>
+                  <span className="text-lg font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
                 </div>
-
-                {/* Fila 1: Marca + N° Serie */}
-                <div className="mb-2.5 grid grid-cols-2 gap-2">
-                  <ItemField label="Marca">
-                    <input value={it.marca || ''} onChange={e => updateItem(idx, 'marca', e.target.value)}
-                      placeholder="Ej: Michelin"
-                      className="item-input" />
-                  </ItemField>
-                  <ItemField label="N° Serie">
-                    <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
-                      placeholder="Ej: SN-0001"
-                      className="item-input" />
-                  </ItemField>
-                </div>
-
-                {/* Fila 2: Medida + Diseño */}
-                <div className="mb-2.5 grid grid-cols-2 gap-2">
-                  <ItemField label="Medida">
-                    <select value={it.media || ''} onChange={e => updateItem(idx, 'media', e.target.value)}
-                      className="item-input">
-                      <option value="">Seleccionar...</option>
-                      {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </ItemField>
-                  <ItemField label="Diseño">
-                    <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
-                      placeholder="Ej: Rayado"
-                      className="item-input" />
-                  </ItemField>
-                </div>
-
-                {/* Fila 3: Cantidad + Valor unitario */}
-                <div className="mb-2.5 grid grid-cols-2 gap-2">
-                  <ItemField label="Cantidad">
-                    <input type="number" min="1" value={String(it.cantidad)}
-                      onChange={e => updateItem(idx, 'cantidad', parseInt(e.target.value) || 1)}
-                      className="item-input" />
-                  </ItemField>
-                  <ItemField label="Valor unitario ($)">
-                    <input type="number" min="0" step="0.01" value={String(it.valor_unitario)}
-                      onChange={e => updateItem(idx, 'valor_unitario', parseFloat(e.target.value) || 0)}
-                      className="item-input" />
-                  </ItemField>
-                </div>
-
-                {/* Fila 4: Observaciones */}
-                <ItemField label="Observaciones">
-                  <input value={it.observaciones} onChange={e => updateItem(idx, 'observaciones', e.target.value)}
-                    placeholder="Notas sobre esta llanta..."
-                    className="item-input" />
-                </ItemField>
-
-                {/* Toggle rechazo */}
-                <button onClick={() => updateItem(idx, 'rechazo', !it.rechazo)}
-                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg border py-2 text-xs font-bold transition ${
-                    it.rechazo
-                      ? 'border-red-200 bg-red-100 text-red-700 hover:bg-red-50'
-                      : 'border-navy-100 bg-navy-50 text-navy-400 hover:border-red-200 hover:text-red-500'
-                  }`}>
-                  {it.rechazo ? '✓ Marcada como rechazada — toca para quitar' : 'Marcar como rechazada (no se cobra)'}
-                </button>
               </div>
-            )
-          })}
-        </div>
-
-        {/* Totales */}
-        <div className="space-y-2 border-t border-navy-100 bg-navy-50/50 px-5 py-4">
-          {totalRechazado > 0 && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-red-400">Rechazado (no se cobra):</span>
-              <span className="font-bold text-red-400 line-through">${totalRechazado.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-navy-400">Total a cobrar:</span>
-            <span className="text-xl font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <button onClick={guardar} disabled={saving}
         className="w-full rounded-xl bg-primary-400 px-4 py-3.5 text-sm font-bold text-navy-500 shadow-sm transition hover:bg-primary-300 active:scale-[0.99] disabled:opacity-60">
@@ -932,6 +963,14 @@ function TrashIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  )
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   )
 }
