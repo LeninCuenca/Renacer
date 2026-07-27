@@ -1,11 +1,9 @@
 /**
- * mockApi.ts — Capa de datos en memoria que replica exactamente el backend
- * FastAPI. Permite que la app web funcione de forma independiente en el
- * navegador sin necesidad del servidor Python.
+ * mockApi.ts — Capa de datos en memoria que replica el backend FastAPI.
  */
 
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
-import { ESTADOS } from './types'
+import { ESTADOS, calcularFechaVencimiento, diasDeCredito } from './types'
 
 // ============================================================
 // Estado en memoria
@@ -25,8 +23,9 @@ let ordenes: Orden[] = [
     fecha_rf: new Date(Date.now() - 86400000 * 3).toISOString(),
     fecha_bodega: null, fecha_ec: null,
     tipo_pago: 'Credito 30 dias',
-    monto_total: 180.0, monto_abonado: 100.0, monto_pendiente: 80.0,
-    pagado_completo: false, activo_vigente: false,
+    fecha_vencimiento: calcularFechaVencimiento(new Date(), 30).toISOString(),
+    monto_total: 100.0, monto_abonado: 100.0, monto_pendiente: 0.0,
+    pagado_completo: true, activo_vigente: true,
     observaciones: 'Cliente frecuente',
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
     items: [
@@ -43,6 +42,7 @@ let ordenes: Orden[] = [
     fecha_bodega: new Date(Date.now() - 86400000 * 7).toISOString(),
     fecha_ec: new Date(Date.now() - 86400000 * 5).toISOString(),
     tipo_pago: 'Contado',
+    fecha_vencimiento: null,
     monto_total: 90.0, monto_abonado: 90.0, monto_pendiente: 0.0,
     pagado_completo: true, activo_vigente: true,
     observaciones: '',
@@ -57,6 +57,7 @@ let ordenes: Orden[] = [
     fecha_rc: new Date(Date.now() - 86400000 * 1).toISOString(),
     fecha_ef: null, fecha_rf: null, fecha_bodega: null, fecha_ec: null,
     tipo_pago: null,
+    fecha_vencimiento: null,
     monto_total: 120.0, monto_abonado: 0.0, monto_pendiente: 120.0,
     pagado_completo: false, activo_vigente: false,
     observaciones: 'Urgente',
@@ -89,7 +90,7 @@ let nextAbonoId = 3
 // Helpers
 // ============================================================
 
-/** Recalcula montos excluyendo items rechazados del total */
+/** Recalcula montos excluyendo items rechazados */
 function recalcular(orden: Orden): void {
   const itemsValidos = orden.items.filter(it => !it.rechazo)
   orden.monto_total = Math.round(itemsValidos.reduce((s, it) => s + it.cantidad * it.valor_unitario, 0) * 100) / 100
@@ -100,7 +101,16 @@ function recalcular(orden: Orden): void {
   orden.activo_vigente = orden.pagado_completo
 }
 
-/** Verifica que el cambio de estado respete la trazabilidad secuencial */
+/** Diferencia en dias enteros entre dos fechas (sin decimales) */
+function diffDias(a?: string | null, b?: string | null): number | null {
+  if (a && b) {
+    const ms = new Date(b).getTime() - new Date(a).getTime()
+    return Math.round(ms / 86400000)
+  }
+  return null
+}
+
+/** Valida la trazabilidad secuencial */
 function validarTransicion(orden: Orden, nuevoEstado: EstadoOrden): void {
   const idxActual = ESTADOS.indexOf(orden.estado)
   const idxNuevo = ESTADOS.indexOf(nuevoEstado)
@@ -112,14 +122,10 @@ function validarTransicion(orden: Orden, nuevoEstado: EstadoOrden): void {
   }
 }
 
-/** Verifica que el pago este completado antes de entregar */
+/** Verifica pago completado antes de entrega */
 function verificarEntrega(orden: Orden): void {
   if (!orden.pagado_completo) {
     throw new Error('No se puede entregar la orden: el pago no esta completado. Registre el abono pendiente primero.')
-  }
-  const tipo = orden.tipo_pago
-  if (tipo === 'Cheque' || tipo === 'Transferencia') {
-    // Para cheque/transferencia se asume verificado al estar pagado_completo
   }
 }
 
@@ -127,9 +133,8 @@ function delay<T>(value: T): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), 200))
 }
 
-function diffDias(a?: string | null, b?: string | null): number | null {
-  if (a && b) return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000 * 10) / 10
-  return null
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 // ============================================================
@@ -188,6 +193,7 @@ export const mockApi = {
       fecha_rc: now,
       fecha_ef: null, fecha_rf: null, fecha_bodega: null, fecha_ec: null,
       tipo_pago: null,
+      fecha_vencimiento: null,
       monto_total: 0, monto_abonado: 0, monto_pendiente: 0,
       pagado_completo: false, activo_vigente: false,
       observaciones: data.observaciones || '',
@@ -225,6 +231,13 @@ export const mockApi = {
     const orden = ordenes.find(o => o.id === ordenId)
     if (!orden) throw new Error('Orden no encontrada')
     orden.tipo_pago = tipoPago
+    // Calcular fecha de vencimiento si es credito
+    const dias = diasDeCredito(tipoPago)
+    if (dias > 0) {
+      orden.fecha_vencimiento = calcularFechaVencimiento(new Date(), dias).toISOString()
+    } else {
+      orden.fecha_vencimiento = null
+    }
     return delay(JSON.parse(JSON.stringify(orden)))
   },
 
@@ -264,13 +277,13 @@ export const mockApi = {
       anio, mes,
       total_ordenes: filtradas.length,
       total_cantidad: filtradas.reduce((s, o) => s + o.items.filter(it => !it.rechazo).reduce((si, it) => si + it.cantidad, 0), 0),
-      promedio_rc_rf_horas: rcRf.length ? Math.round(rcRf.reduce((a, b) => a + b, 0) / rcRf.length * 10) / 10 : null,
-      promedio_ef_rf_horas: efRf.length ? Math.round(efRf.reduce((a, b) => a + b, 0) / efRf.length * 10) / 10 : null,
-      promedio_rc_ec_horas: rcEc.length ? Math.round(rcEc.reduce((a, b) => a + b, 0) / rcEc.length * 10) / 10 : null,
+      promedio_rc_rf_dias: rcRf.length ? Math.round(rcRf.reduce((a, b) => a + b, 0) / rcRf.length) : null,
+      promedio_ef_rf_dias: efRf.length ? Math.round(efRf.reduce((a, b) => a + b, 0) / efRf.length) : null,
+      promedio_rc_ec_dias: rcEc.length ? Math.round(rcEc.reduce((a, b) => a + b, 0) / rcEc.length) : null,
     })
   },
 
-  /** Exporta un CSV con una seccion por cliente (no general) */
+  /** Exporta un archivo Excel (.xls) real con formato de tabla, agrupado por cliente */
   async downloadExcel(anio: number, mes: number): Promise<void> {
     const inicio = new Date(anio, mes - 1, 1)
     const fin = new Date(mes === 12 ? anio + 1 : anio, mes === 12 ? 0 : mes, 1)
@@ -281,13 +294,9 @@ export const mockApi = {
 
     const fmt = (d?: string | null) => d ? new Date(d).toLocaleDateString('es-EC', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
     const diff = (a?: string | null, b?: string | null) => {
-      if (a && b) return String(Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000 * 10) / 10)
-      return ''
+      const v = diffDias(a, b)
+      return v != null ? String(v) : ''
     }
-
-    const lines: string[] = []
-    lines.push(`"Reporte Renacer - ${String(mes).padStart(2, '0')}/${anio}"`)
-    lines.push('')
 
     // Agrupar por cliente
     const porCliente = new Map<number, Orden[]>()
@@ -297,15 +306,32 @@ export const mockApi = {
       porCliente.set(o.cliente_id, arr)
     }
 
-    const headers = ['Cliente', 'N° Orden', 'Cantidad (items validos)', 'Recepcion (RC)', 'Envio fabrica (EF)', 'Retorno fabrica (RF)', 'Entrega (EC)', 'Dias RC-RF', 'Dias EF-RF', 'Dias RC-EC', 'Total', 'Abonado', 'Pendiente', 'Estado']
+    let body = ''
+
+    // Estilos
+    const thStyle = 'background:#1e3a5f;color:white;font-weight:bold;border:1px solid #1e3a5f;padding:4px 8px;text-align:center;font-size:11px;'
+    const tdStyle = 'border:1px solid #ccc;padding:4px 8px;font-size:11px;'
+    const tdNum = 'border:1px solid #ccc;padding:4px 8px;font-size:11px;text-align:right;'
+    const totalStyle = 'border:1px solid #ccc;padding:4px 8px;font-size:11px;font-weight:bold;background:#e8f0fe;'
+    const totalNum = 'border:1px solid #ccc;padding:4px 8px;font-size:11px;font-weight:bold;background:#e8f0fe;text-align:right;'
+    const titleStyle = 'font-size:16px;font-weight:bold;color:#1e3a5f;padding:8px 0;'
+    const subtitleStyle = 'font-size:12px;color:#666;padding:2px 0 8px;'
+
+    body += `<tr><td colspan="14" style="${titleStyle}">Reporte Renacer - ${String(mes).padStart(2, '0')}/${anio}</td></tr>`
+    body += `<tr><td colspan="14" style="${subtitleStyle}">Tiempos expresados en dias naturales (enteros)</td></tr>`
+    body += '<tr><td colspan="14"></td></tr>'
 
     for (const [cliId, ords] of porCliente) {
       const cli = clientes.find(c => c.id === cliId)
       const cliNombre = cli?.nombre || 'Desconocido'
       const cliDir = cli?.direccion || ''
-      lines.push(`"CLIENTE: ${cliNombre}"`)
-      if (cliDir) lines.push(`"Direccion: ${cliDir}"`)
-      lines.push(headers.map(h => `"${h}"`).join(','))
+      const dirText = cliDir ? ` — Direccion: ${cliDir}` : ''
+
+      body += `<tr><td colspan="14" style="font-size:13px;font-weight:bold;color:#1e3a5f;padding:6px 0 2px;">CLIENTE: ${escapeXml(cliNombre)}${escapeXml(dirText)}</td></tr>`
+
+      // Encabezado de tabla
+      const headers = ['Cliente', 'N° Orden', 'Cant. (valida)', 'Recepcion (RC)', 'Envio (EF)', 'Retorno (RF)', 'Entrega (EC)', 'Dias RC-RF', 'Dias EF-RF', 'Dias RC-EC', 'Total', 'Abonado', 'Pendiente', 'Estado']
+      body += '<tr>' + headers.map(h => `<td style="${thStyle}">${h}</td>`).join('') + '</tr>'
 
       let totCant = 0, totTotal = 0, totAbonado = 0, totPendiente = 0
       const rcRfVals: number[] = [], efRfVals: number[] = [], rcEcVals: number[] = []
@@ -321,33 +347,63 @@ export const mockApi = {
         const dEfRf = diffDias(o.fecha_ef, o.fecha_rf); if (dEfRf != null) efRfVals.push(dEfRf)
         const dRcEc = diffDias(o.fecha_rc, o.fecha_ec); if (dRcEc != null) rcEcVals.push(dRcEc)
 
-        lines.push([
-          cliNombre, o.numero, String(cantValida),
+        body += '<tr>' + [
+          escapeXml(cliNombre), escapeXml(o.numero), String(cantValida),
           fmt(o.fecha_rc), fmt(o.fecha_ef), fmt(o.fecha_rf), fmt(o.fecha_ec),
           diff(o.fecha_rc, o.fecha_rf), diff(o.fecha_ef, o.fecha_rf), diff(o.fecha_rc, o.fecha_ec),
           o.monto_total.toFixed(2), o.monto_abonado.toFixed(2), o.monto_pendiente.toFixed(2),
-          o.estado,
-        ].map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+          escapeXml(o.estado),
+        ].map((c, i) => {
+          const isNum = i >= 2 && i <= 9 || i >= 10 && i <= 12
+          return `<td style="${isNum ? tdNum : tdStyle}">${c}</td>`
+        }).join('') + '</tr>'
       }
 
-      // Fila de totales del cliente
-      lines.push([
-        `"TOTAL ${cliNombre}"`, '', String(totCant), '', '', '', '',
-        rcRfVals.length ? String(Math.round(rcRfVals.reduce((a, b) => a + b, 0) / rcRfVals.length * 10) / 10) : '',
-        efRfVals.length ? String(Math.round(efRfVals.reduce((a, b) => a + b, 0) / efRfVals.length * 10) / 10) : '',
-        rcEcVals.length ? String(Math.round(rcEcVals.reduce((a, b) => a + b, 0) / rcEcVals.length * 10) / 10) : '',
+      // Fila totales del cliente
+      body += '<tr>' + [
+        `TOTAL ${cliNombre}`, '', String(totCant), '', '', '', '',
+        rcRfVals.length ? String(Math.round(rcRfVals.reduce((a, b) => a + b, 0) / rcRfVals.length)) : '',
+        efRfVals.length ? String(Math.round(efRfVals.reduce((a, b) => a + b, 0) / efRfVals.length)) : '',
+        rcEcVals.length ? String(Math.round(rcEcVals.reduce((a, b) => a + b, 0) / rcEcVals.length)) : '',
         totTotal.toFixed(2), totAbonado.toFixed(2), totPendiente.toFixed(2), '',
-      ].join(','))
-      lines.push('')
+      ].map((c, i) => {
+        const isNum = i >= 2 && i <= 9 || i >= 10 && i <= 12
+        return `<td style="${isNum ? totalNum : totalStyle}">${c}</td>`
+      }).join('') + '</tr>'
+
+      body += '<tr><td colspan="14" style="height:12px;"></td></tr>'
     }
 
-    const csv = lines.join('\n')
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Reporte</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>
+<body><table border="1">${body}</table></body></html>`
+
+    const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `reporte_renacer_${anio}_${String(mes).padStart(2, '0')}.csv`
+    a.download = `reporte_renacer_${anio}_${String(mes).padStart(2, '0')}.xls`
     a.click()
     URL.revokeObjectURL(url)
+  },
+
+  // --- Alertas de credito por vencer ---
+  async getCreditosPorVencer(): Promise<Array<{ orden: Orden; diasRestantes: number; porVencer: boolean; vencido: boolean }>> {
+    const ahora = new Date()
+    const result: Array<{ orden: Orden; diasRestantes: number; porVencer: boolean; vencido: boolean }> = []
+    for (const o of ordenes) {
+      if (!o.fecha_vencimiento) continue
+      if (o.pagado_completo) continue
+      const venc = new Date(o.fecha_vencimiento)
+      const diffMs = venc.getTime() - ahora.getTime()
+      const dias = Math.ceil(diffMs / 86400000)
+      result.push({
+        orden: JSON.parse(JSON.stringify(o)),
+        diasRestantes: dias,
+        porVencer: dias >= 0 && dias <= 7,
+        vencido: dias < 0,
+      })
+    }
+    return delay(result.sort((a, b) => a.diasRestantes - b.diasRestantes))
   },
 }

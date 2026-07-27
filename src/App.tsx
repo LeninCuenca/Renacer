@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
-import { ESTADOS, TIPOS_PAGO, DIRECCIONES, MEDIDAS_LLANTAS } from './types'
+import { ESTADOS, TIPOS_PAGO, DIRECCIONES, MEDIDAS_LLANTAS, diasDeCredito, calcularFechaVencimiento, esFeriado, esFinDeSemana } from './types'
 import { mockApi } from './mockApi'
 
 // ============================================================
@@ -11,6 +11,13 @@ type Tab = 'ordenes' | 'nueva' | 'clientes' | 'reporte'
 export default function App() {
   const [tab, setTab] = useState<Tab>('ordenes')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [alertasCount, setAlertasCount] = useState(0)
+
+  useEffect(() => {
+    mockApi.getCreditosPorVencer().then(alertas => {
+      setAlertasCount(alertas.filter(a => a.porVencer || a.vencido).length)
+    }).catch(() => {})
+  }, [refreshKey])
 
   return (
     <div className="min-h-screen bg-[#f4f5f7]">
@@ -21,8 +28,16 @@ export default function App() {
             <h1 className="text-base font-bold leading-tight text-white">Renacer</h1>
             <p className="text-[11px] leading-tight text-navy-100">Registro Operativo</p>
           </div>
-          <div className="ml-auto rounded-full bg-primary-400 px-3 py-1 text-xs font-bold text-navy-500">
-            {tab === 'ordenes' ? 'Ordenes' : tab === 'nueva' ? 'Nueva Orden' : tab === 'clientes' ? 'Clientes' : 'Reporte'}
+          <div className="ml-auto flex items-center gap-2">
+            {alertasCount > 0 && (
+              <button onClick={() => setTab('ordenes')}
+                className="flex items-center gap-1.5 rounded-full bg-red-500 px-2.5 py-1 text-xs font-bold text-white animate-pulse">
+                <BellIcon /> {alertasCount}
+              </button>
+            )}
+            <div className="rounded-full bg-primary-400 px-3 py-1 text-xs font-bold text-navy-500">
+              {tab === 'ordenes' ? 'Ordenes' : tab === 'nueva' ? 'Nueva' : tab === 'clientes' ? 'Clientes' : 'Reporte'}
+            </div>
           </div>
         </div>
       </header>
@@ -106,12 +121,7 @@ function ClientesScreen() {
   }
 
   const clientesFiltrados = filtroDir ? clientes.filter(c => c.direccion === filtroDir) : clientes
-
-  // Conteo por direccion
-  const conteoDir = DIRECCIONES.map(d => ({
-    direccion: d,
-    count: clientes.filter(c => c.direccion === d).length,
-  })).filter(d => d.count > 0)
+  const conteoDir = DIRECCIONES.map(d => ({ direccion: d, count: clientes.filter(c => c.direccion === d).length })).filter(d => d.count > 0)
 
   if (loading) return <LoadingView />
 
@@ -147,18 +157,13 @@ function ClientesScreen() {
         </div>
       )}
 
-      {/* Conteo por direccion */}
       {conteoDir.length > 0 && (
         <div className="rounded-xl border border-navy-100 bg-white p-4 shadow-sm">
           <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-primary-600">Conteo por direccion</h3>
           <div className="flex flex-wrap gap-2">
             {conteoDir.map(d => (
               <button key={d.direccion} onClick={() => setFiltroDir(filtroDir === d.direccion ? '' : d.direccion)}
-                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                  filtroDir === d.direccion
-                    ? 'bg-primary-400 text-navy-500'
-                    : 'bg-navy-50 text-navy-400 hover:bg-navy-100'
-                }`}>
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${filtroDir === d.direccion ? 'bg-primary-400 text-navy-500' : 'bg-navy-50 text-navy-400 hover:bg-navy-100'}`}>
                 {d.direccion} ({d.count})
               </button>
             ))}
@@ -166,7 +171,6 @@ function ClientesScreen() {
         </div>
       )}
 
-      {/* Filtro activo */}
       {filtroDir && (
         <div className="flex items-center gap-2 text-xs">
           <span className="font-semibold text-navy-400">Filtrando por:</span>
@@ -184,9 +188,7 @@ function ClientesScreen() {
               <p className="text-sm font-bold text-navy-500">{c.nombre}</p>
               <p className="mt-1 text-xs text-navy-300">Cedula: {c.cedula}</p>
               {c.telefono && <p className="text-xs text-navy-300">Tel: {c.telefono}</p>}
-              {c.direccion && (
-                <p className="mt-1.5 inline-block rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-400">{c.direccion}</p>
-              )}
+              {c.direccion && <p className="mt-1.5 inline-block rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-400">{c.direccion}</p>}
             </div>
           ))}
         </div>
@@ -211,9 +213,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
     return { marca: '', n_serie: '', media: '', diseno: '', cantidad: 1, valor_unitario: 0, rechazo: false, observaciones: '' }
   }
 
-  useEffect(() => {
-    mockApi.getClientes().then(setClientes).catch(() => {})
-  }, [])
+  useEffect(() => { mockApi.getClientes().then(setClientes).catch(() => {}) }, [])
 
   const updateItem = (idx: number, campo: keyof Item, valor: string | boolean | number) => {
     setItems(prev => prev.map((it, i) => i === idx ? { ...it, [campo]: valor } : it))
@@ -222,13 +222,8 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
   const agregarItem = () => setItems(prev => [...prev, nuevoItem()])
   const quitarItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx))
 
-  // Total excluye items rechazados
-  const totalEstimado = items
-    .filter(it => !it.rechazo)
-    .reduce((sum, it) => sum + (it.cantidad * it.valor_unitario), 0)
-  const totalRechazado = items
-    .filter(it => it.rechazo)
-    .reduce((sum, it) => sum + (it.cantidad * it.valor_unitario), 0)
+  const totalEstimado = items.filter(it => !it.rechazo).reduce((sum, it) => sum + it.cantidad * it.valor_unitario, 0)
+  const totalRechazado = items.filter(it => it.rechazo).reduce((sum, it) => sum + it.cantidad * it.valor_unitario, 0)
 
   const guardar = async () => {
     if (!clienteId || !numero.trim()) { setError('Seleccione cliente e ingrese numero de orden'); return }
@@ -256,7 +251,6 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
       <h2 className="text-lg font-bold text-navy-500">Nueva Orden de Trabajo</h2>
       {error && <ErrorBox message={error} onClose={() => setError(null)} />}
 
-      {/* Datos generales */}
       <section className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-navy-500">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-400 text-xs font-bold text-navy-500">1</span>
@@ -274,7 +268,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
       </section>
 
-      {/* Items - tabla compacta */}
+      {/* Items - tabla compacta con todos los campos en una fila */}
       <section className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-bold text-navy-500">
@@ -284,49 +278,64 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
           <button onClick={agregarItem} className="rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-navy-500 transition hover:bg-primary-100">+ Agregar</button>
         </div>
 
-        {/* Tabla compacta de items */}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-navy-100 text-left text-[11px] uppercase tracking-wide text-navy-300">
-                <th className="pb-2 pr-2 font-semibold">Marca</th>
-                <th className="pb-2 px-1 font-semibold">Medida</th>
-                <th className="pb-2 px-1 font-semibold">Cant.</th>
-                <th className="pb-2 px-1 font-semibold">V. Unit.</th>
-                <th className="pb-2 px-1 font-semibold">Rech.</th>
-                <th className="pb-2 pl-1 font-semibold w-8"></th>
+              <tr className="bg-navy-50 text-left text-[10px] uppercase tracking-wide text-navy-300">
+                <th className="border-b border-navy-100 px-2 py-2 font-semibold">Marca</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold">N° Serie</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold">Medida</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold">Diseño</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-center">Cant.</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-right">V. Unit.</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-center">Rech.</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-right">Subtotal</th>
+                <th className="border-b border-navy-100 px-1 py-2 font-semibold w-8"></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it, idx) => {
                 const subtotal = it.cantidad * it.valor_unitario
                 return (
-                  <tr key={idx} className="border-b border-navy-50">
-                    <td className="py-2 pr-2">
+                  <tr key={idx} className={`border-b border-navy-50 ${it.rechazo ? 'bg-red-50/40' : ''}`}>
+                    <td className="px-2 py-1.5">
                       <input value={it.marca || ''} onChange={e => updateItem(idx, 'marca', e.target.value)}
                         placeholder="Michelin"
                         className="w-24 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
                     </td>
-                    <td className="py-2 px-1">
+                    <td className="px-1 py-1.5">
+                      <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
+                        placeholder="SN001"
+                        className="w-20 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                    </td>
+                    <td className="px-1 py-1.5">
                       <select value={it.media || ''} onChange={e => updateItem(idx, 'media', e.target.value)}
-                        className="w-24 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none">
+                        className="w-20 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none">
                         <option value="">Medida</option>
                         {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                     </td>
-                    <td className="py-2 px-1">
+                    <td className="px-1 py-1.5">
+                      <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
+                        placeholder="Rayado"
+                        className="w-20 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                    </td>
+                    <td className="px-1 py-1.5 text-center">
                       <input type="number" value={String(it.cantidad)} onChange={e => updateItem(idx, 'cantidad', parseInt(e.target.value) || 1)}
-                        className="w-12 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                        className="w-12 rounded border border-navy-100 bg-white px-1 py-1 text-center text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
                     </td>
-                    <td className="py-2 px-1">
+                    <td className="px-1 py-1.5 text-right">
                       <input type="number" value={String(it.valor_unitario)} onChange={e => updateItem(idx, 'valor_unitario', parseFloat(e.target.value) || 0)}
-                        className="w-16 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                        className="w-16 rounded border border-navy-100 bg-white px-1 py-1 text-right text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
                     </td>
-                    <td className="py-2 px-1 text-center">
+                    <td className="px-1 py-1.5 text-center">
                       <input type="checkbox" checked={it.rechazo} onChange={e => updateItem(idx, 'rechazo', e.target.checked)}
                         className="h-4 w-4 rounded border-navy-200 text-primary-400 focus:ring-primary-300" />
                     </td>
-                    <td className="py-2 pl-1 text-center">
+                    <td className="px-1 py-1.5 text-right text-xs font-bold">
+                      <span className={it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}>${subtotal.toFixed(2)}</span>
+                    </td>
+                    <td className="px-1 py-1.5 text-center">
                       {items.length > 1 && (
                         <button onClick={() => quitarItem(idx)} className="text-xs text-red-400 hover:text-red-600">✕</button>
                       )}
@@ -338,27 +347,20 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
           </table>
         </div>
 
-        {/* Detalle expandible opcional por item */}
+        {/* Observaciones por item - compactas debajo */}
         <details className="mt-3">
-          <summary className="cursor-pointer text-xs font-semibold text-navy-300 hover:text-navy-500">Ver detalles por item (serie, diseño, observaciones)</summary>
-          <div className="mt-3 space-y-3">
+          <summary className="cursor-pointer text-xs font-semibold text-navy-300 hover:text-navy-500">Observaciones por item</summary>
+          <div className="mt-2 space-y-2">
             {items.map((it, idx) => (
-              <div key={idx} className="rounded-lg border border-navy-50 bg-[#f8f9fb] p-3">
-                <p className="mb-2 text-xs font-bold text-navy-500">Item #{idx + 1} — {it.marca || 'Sin marca'} ({it.media || 'S/M'})</p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
-                    placeholder="N° Serie" className="rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                  <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
-                    placeholder="Diseño" className="rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                </div>
+              <div key={idx} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-xs font-bold text-navy-400">#{idx + 1} {it.marca || 'S/M'}:</span>
                 <input value={it.observaciones} onChange={e => updateItem(idx, 'observaciones', e.target.value)}
-                  placeholder="Observaciones del item" className="mt-2 w-full rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                  placeholder="Observaciones..." className="flex-1 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
               </div>
             ))}
           </div>
         </details>
 
-        {/* Totales */}
         <div className="mt-4 space-y-1 border-t border-navy-100 pt-3">
           {totalRechazado > 0 && (
             <div className="flex items-center justify-between text-xs">
@@ -384,16 +386,25 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
 // ============================================================
 // Pantalla: Ordenes
 // ============================================================
+interface AlertaCredito {
+  orden: Orden
+  diasRestantes: number
+  porVencer: boolean
+  vencido: boolean
+}
+
 function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
   const [ordenes, setOrdenes] = useState<Orden[]>([])
+  const [alertas, setAlertas] = useState<AlertaCredito[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Orden | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
-      const data = await mockApi.getOrdenes()
+      const [data, al] = await Promise.all([mockApi.getOrdenes(), mockApi.getCreditosPorVencer()])
       setOrdenes(data)
+      setAlertas(al)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar')
     } finally {
@@ -405,6 +416,8 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
 
   if (loading) return <LoadingView />
 
+  const alertasActivas = alertas.filter(a => a.porVencer || a.vencido)
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -414,12 +427,46 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
 
       {error && <ErrorBox message={error} onClose={() => setError(null)} />}
 
+      {/* Alertas de credito */}
+      {alertasActivas.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-amber-700">
+            <BellIcon /> Alertas de credito por vencer
+          </h3>
+          <div className="space-y-2">
+            {alertasActivas.map(a => (
+              <div key={a.orden.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2">
+                <div>
+                  <span className="text-sm font-bold text-navy-500">{a.orden.numero}</span>
+                  <span className="ml-2 text-xs text-navy-300">{a.orden.cliente_nombre}</span>
+                </div>
+                <div className="text-right">
+                  {a.vencido ? (
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+                      Vencido hace {Math.abs(a.diasRestantes)} dias
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+                      Vence en {a.diasRestantes} dias
+                    </span>
+                  )}
+                  <p className="mt-0.5 text-xs text-navy-300">
+                    Venc: {new Date(a.orden.fecha_vencimiento!).toLocaleDateString('es-EC')}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {ordenes.length === 0 ? (
         <EmptyState text="No hay ordenes registradas. Cree una desde la pestana Nueva." />
       ) : (
         <div className="grid gap-3">
           {ordenes.map(o => {
             const cantValida = o.items.filter(it => !it.rechazo).reduce((s, it) => s + it.cantidad, 0)
+            const alerta = alertas.find(a => a.orden.id === o.id)
             return (
               <button key={o.id} onClick={() => setSelected(o)}
                 className="rounded-xl border border-navy-100 bg-white p-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md">
@@ -435,6 +482,11 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
                     ? <span className="font-bold text-green-600">Pagado</span>
                     : <span className="text-red-500">Pend: ${o.monto_pendiente.toFixed(2)}</span>}
                 </div>
+                {alerta && (alerta.porVencer || alerta.vencido) && (
+                  <div className={`mt-2 rounded-lg px-2 py-1 text-xs font-bold ${alerta.vencido ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'}`}>
+                    {alerta.vencido ? `Credito vencido hace ${Math.abs(alerta.diasRestantes)} dias` : `Credito vence en ${alerta.diasRestantes} dias`}
+                  </div>
+                )}
               </button>
             )
           })}
@@ -452,6 +504,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [msgType, setMsgType] = useState<'success' | 'error'>('success')
+  const [fechaVencPreview, setFechaVencPreview] = useState<string | null>(orden.fecha_vencimiento || null)
   const overlayRef = useRef<HTMLDivElement>(null)
 
   const idxActual = ESTADOS.indexOf(orden.estado)
@@ -496,15 +549,33 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
     if (!tipoPago) return
     setSaving(true); setMsg(null)
     try {
-      await mockApi.definirPago(orden.id, tipoPago as TipoPago)
+      const actualizada = await mockApi.definirPago(orden.id, tipoPago as TipoPago)
+      setFechaVencPreview(actualizada.fecha_vencimiento || null)
       setMsgType('success')
-      setMsg(`Tipo de pago definido: ${tipoPago}`)
+      const dias = diasDeCredito(tipoPago)
+      if (dias > 0 && actualizada.fecha_vencimiento) {
+        setMsg(`Credito a ${dias} dias. Vence el ${new Date(actualizada.fecha_vencimiento).toLocaleDateString('es-EC')}`)
+      } else {
+        setMsg(`Tipo de pago: ${tipoPago}`)
+      }
       onClose()
     } catch (e) {
       setMsgType('error')
       setMsg(e instanceof Error ? e.message : 'Error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Calcular preview de vencimiento al cambiar tipo de pago
+  const onTipoPagoChange = (val: string) => {
+    setTipoPago(val)
+    const dias = diasDeCredito(val)
+    if (dias > 0) {
+      const fecha = calcularFechaVencimiento(new Date(), dias)
+      setFechaVencPreview(fecha.toISOString())
+    } else {
+      setFechaVencPreview(null)
     }
   }
 
@@ -548,7 +619,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
           })}
         </div>
 
-        {/* Cambiar estado - solo siguiente paso */}
+        {/* Avanzar estado */}
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Avanzar estado operativo</h4>
         {estadoSiguiente ? (
           <div>
@@ -598,13 +669,31 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
           <PagoRow label="Pendiente" value={orden.monto_pendiente} color={orden.monto_pendiente > 0 ? 'text-red-500' : 'text-green-600'} />
         </div>
 
-        {/* Tipo de pago */}
+        {/* Tipo de pago + calendario de credito */}
         <label className="mt-4 mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Tipo de pago</label>
-        <select value={tipoPago} onChange={e => setTipoPago(e.target.value)}
+        <select value={tipoPago} onChange={e => onTipoPagoChange(e.target.value)}
           className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200">
           <option value="">Sin definir</option>
           {TIPOS_PAGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+
+        {/* Preview de fecha de vencimiento */}
+        {fechaVencPreview && (
+          <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3">
+            <div className="flex items-center gap-2">
+              <CalendarIcon />
+              <div>
+                <p className="text-xs font-bold text-navy-500">
+                  Vencimiento del credito: {new Date(fechaVencPreview).toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                </p>
+                <p className="mt-0.5 text-[11px] text-navy-300">
+                  {diasDeCredito(tipoPago)} dias habiles (excluye fines de semana y feriados del Ecuador)
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <button onClick={definirPago} disabled={saving || !tipoPago}
           className="mt-2 w-full rounded-lg bg-navy-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-navy-600 disabled:opacity-60">
           Definir tipo de pago
@@ -673,9 +762,7 @@ function ReporteScreen() {
 
   useEffect(() => { cargarResumen() }, [])
 
-  const descargarExcel = () => {
-    mockApi.downloadExcel(anio, mes)
-  }
+  const descargarExcel = () => { mockApi.downloadExcel(anio, mes) }
 
   return (
     <div className="space-y-5">
@@ -713,17 +800,17 @@ function ReporteScreen() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Total ordenes" value={String(resumen.total_ordenes)} />
             <StatCard label="Total items" value={String(resumen.total_cantidad)} />
-            <StatCard label="Prom. RC→RF" value={resumen.promedio_rc_rf_horas != null ? `${resumen.promedio_rc_rf_horas}d` : '—'} />
-            <StatCard label="Prom. EF→RF" value={resumen.promedio_ef_rf_horas != null ? `${resumen.promedio_ef_rf_horas}d` : '—'} />
-            <StatCard label="Prom. RC→EC" value={resumen.promedio_rc_ec_horas != null ? `${resumen.promedio_rc_ec_horas}d` : '—'} />
+            <StatCard label="Prom. RC→RF" value={resumen.promedio_rc_rf_dias != null ? `${resumen.promedio_rc_rf_dias} dias` : '—'} />
+            <StatCard label="Prom. EF→RF" value={resumen.promedio_ef_rf_dias != null ? `${resumen.promedio_ef_rf_dias} dias` : '—'} />
+            <StatCard label="Prom. RC→EC" value={resumen.promedio_rc_ec_dias != null ? `${resumen.promedio_rc_ec_dias} dias` : '—'} />
           </div>
-          <p className="mt-3 text-xs text-navy-200">Tiempos promedio expresados en dias</p>
+          <p className="mt-3 text-xs text-navy-200">Tiempos promedio en dias naturales (enteros)</p>
         </section>
       )}
 
       <button onClick={descargarExcel}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-400 px-4 py-3.5 text-sm font-bold text-navy-500 shadow-sm transition hover:bg-primary-300 active:scale-[0.99]">
-        <DownloadIcon /> Descargar reporte por cliente
+        <DownloadIcon /> Descargar Excel por cliente
       </button>
     </div>
   )
@@ -797,6 +884,26 @@ function DownloadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function BellIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   )
 }
