@@ -30,3 +30,21 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 .animate-scale-in { animation: scaleIn 0.2s ease-out; }
+
+/* Inputs dentro de tarjetas de items */
+.item-input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  color: #1B263B;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.item-input::placeholder { color: #9aa8bd; }
+.item-input:focus {
+  outline: none;
+  border-color: #2DD4BF;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.2);
+}

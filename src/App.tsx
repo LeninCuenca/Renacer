@@ -268,109 +268,128 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
       </section>
 
-      {/* Items - tabla compacta con todos los campos en una fila */}
-      <section className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      {/* Items — una tarjeta por llanta */}
+      <section className="rounded-xl border border-navy-100 bg-white shadow-sm">
+        {/* Cabecera de la sección */}
+        <div className="flex items-center justify-between border-b border-navy-100 px-5 py-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-navy-500">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-400 text-xs font-bold text-navy-500">2</span>
             Items / Llantas
+            <span className="ml-1 rounded-full bg-navy-100 px-2 py-0.5 text-xs font-bold text-navy-400">{items.length}</span>
           </h3>
-          <button onClick={agregarItem} className="rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-navy-500 transition hover:bg-primary-100">+ Agregar</button>
+          <button onClick={agregarItem}
+            className="flex items-center gap-1.5 rounded-lg bg-navy-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-navy-600 active:scale-95">
+            <span className="text-base leading-none">+</span> Agregar llanta
+          </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="bg-navy-50 text-left text-[10px] uppercase tracking-wide text-navy-300">
-                <th className="border-b border-navy-100 px-2 py-2 font-semibold">Marca</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold">N° Serie</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold">Medida</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold">Diseño</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-center">Cant.</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-right">V. Unit.</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-center">Rech.</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold text-right">Subtotal</th>
-                <th className="border-b border-navy-100 px-1 py-2 font-semibold w-8"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, idx) => {
-                const subtotal = it.cantidad * it.valor_unitario
-                return (
-                  <tr key={idx} className={`border-b border-navy-50 ${it.rechazo ? 'bg-red-50/40' : ''}`}>
-                    <td className="px-2 py-1.5">
-                      <input value={it.marca || ''} onChange={e => updateItem(idx, 'marca', e.target.value)}
-                        placeholder="Michelin"
-                        className="w-24 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
-                        placeholder="SN001"
-                        className="w-20 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <select value={it.media || ''} onChange={e => updateItem(idx, 'media', e.target.value)}
-                        className="w-20 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none">
-                        <option value="">Medida</option>
-                        {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
-                        placeholder="Rayado"
-                        className="w-20 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                    </td>
-                    <td className="px-1 py-1.5 text-center">
-                      <input type="number" value={String(it.cantidad)} onChange={e => updateItem(idx, 'cantidad', parseInt(e.target.value) || 1)}
-                        className="w-12 rounded border border-navy-100 bg-white px-1 py-1 text-center text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                    </td>
-                    <td className="px-1 py-1.5 text-right">
-                      <input type="number" value={String(it.valor_unitario)} onChange={e => updateItem(idx, 'valor_unitario', parseFloat(e.target.value) || 0)}
-                        className="w-16 rounded border border-navy-100 bg-white px-1 py-1 text-right text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
-                    </td>
-                    <td className="px-1 py-1.5 text-center">
-                      <input type="checkbox" checked={it.rechazo} onChange={e => updateItem(idx, 'rechazo', e.target.checked)}
-                        className="h-4 w-4 rounded border-navy-200 text-primary-400 focus:ring-primary-300" />
-                    </td>
-                    <td className="px-1 py-1.5 text-right text-xs font-bold">
-                      <span className={it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}>${subtotal.toFixed(2)}</span>
-                    </td>
-                    <td className="px-1 py-1.5 text-center">
-                      {items.length > 1 && (
-                        <button onClick={() => quitarItem(idx)} className="text-xs text-red-400 hover:text-red-600">✕</button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {/* Lista de tarjetas */}
+        <div className="divide-y divide-navy-50">
+          {items.map((it, idx) => {
+            const subtotal = it.cantidad * it.valor_unitario
+            return (
+              <div key={idx} className={`px-5 py-4 transition-colors ${it.rechazo ? 'bg-red-50/60' : 'bg-white'}`}>
+                {/* Fila superior: numero de item, subtotal, botón eliminar */}
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 text-xs font-extrabold text-navy-500">
+                      {idx + 1}
+                    </span>
+                    {it.rechazo && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-600">
+                        Rechazada
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-base font-extrabold ${it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}`}>
+                      ${subtotal.toFixed(2)}
+                    </span>
+                    {items.length > 1 && (
+                      <button onClick={() => quitarItem(idx)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-navy-200 transition hover:bg-red-50 hover:text-red-500">
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-        {/* Observaciones por item - compactas debajo */}
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs font-semibold text-navy-300 hover:text-navy-500">Observaciones por item</summary>
-          <div className="mt-2 space-y-2">
-            {items.map((it, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className="w-20 shrink-0 text-xs font-bold text-navy-400">#{idx + 1} {it.marca || 'S/M'}:</span>
-                <input value={it.observaciones} onChange={e => updateItem(idx, 'observaciones', e.target.value)}
-                  placeholder="Observaciones..." className="flex-1 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                {/* Fila 1: Marca + N° Serie */}
+                <div className="mb-2.5 grid grid-cols-2 gap-2">
+                  <ItemField label="Marca">
+                    <input value={it.marca || ''} onChange={e => updateItem(idx, 'marca', e.target.value)}
+                      placeholder="Ej: Michelin"
+                      className="item-input" />
+                  </ItemField>
+                  <ItemField label="N° Serie">
+                    <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
+                      placeholder="Ej: SN-0001"
+                      className="item-input" />
+                  </ItemField>
+                </div>
+
+                {/* Fila 2: Medida + Diseño */}
+                <div className="mb-2.5 grid grid-cols-2 gap-2">
+                  <ItemField label="Medida">
+                    <select value={it.media || ''} onChange={e => updateItem(idx, 'media', e.target.value)}
+                      className="item-input">
+                      <option value="">Seleccionar...</option>
+                      {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </ItemField>
+                  <ItemField label="Diseño">
+                    <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
+                      placeholder="Ej: Rayado"
+                      className="item-input" />
+                  </ItemField>
+                </div>
+
+                {/* Fila 3: Cantidad + Valor unitario */}
+                <div className="mb-2.5 grid grid-cols-2 gap-2">
+                  <ItemField label="Cantidad">
+                    <input type="number" min="1" value={String(it.cantidad)}
+                      onChange={e => updateItem(idx, 'cantidad', parseInt(e.target.value) || 1)}
+                      className="item-input" />
+                  </ItemField>
+                  <ItemField label="Valor unitario ($)">
+                    <input type="number" min="0" step="0.01" value={String(it.valor_unitario)}
+                      onChange={e => updateItem(idx, 'valor_unitario', parseFloat(e.target.value) || 0)}
+                      className="item-input" />
+                  </ItemField>
+                </div>
+
+                {/* Fila 4: Observaciones */}
+                <ItemField label="Observaciones">
+                  <input value={it.observaciones} onChange={e => updateItem(idx, 'observaciones', e.target.value)}
+                    placeholder="Notas sobre esta llanta..."
+                    className="item-input" />
+                </ItemField>
+
+                {/* Toggle rechazo */}
+                <button onClick={() => updateItem(idx, 'rechazo', !it.rechazo)}
+                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg border py-2 text-xs font-bold transition ${
+                    it.rechazo
+                      ? 'border-red-200 bg-red-100 text-red-700 hover:bg-red-50'
+                      : 'border-navy-100 bg-navy-50 text-navy-400 hover:border-red-200 hover:text-red-500'
+                  }`}>
+                  {it.rechazo ? '✓ Marcada como rechazada — toca para quitar' : 'Marcar como rechazada (no se cobra)'}
+                </button>
               </div>
-            ))}
-          </div>
-        </details>
+            )
+          })}
+        </div>
 
-        <div className="mt-4 space-y-1 border-t border-navy-100 pt-3">
+        {/* Totales */}
+        <div className="space-y-2 border-t border-navy-100 bg-navy-50/50 px-5 py-4">
           {totalRechazado > 0 && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-red-400 line-through">Rechazado (no se cobra):</span>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-red-400">Rechazado (no se cobra):</span>
               <span className="font-bold text-red-400 line-through">${totalRechazado.toFixed(2)}</span>
             </div>
           )}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-navy-300">Total a cobrar:</span>
-            <span className="text-lg font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
+            <span className="text-sm font-semibold text-navy-400">Total a cobrar:</span>
+            <span className="text-xl font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
           </div>
         </div>
       </section>
@@ -905,5 +924,23 @@ function CalendarIcon() {
       <line x1="8" y1="2" x2="8" y2="6" />
       <line x1="3" y1="10" x2="21" y2="10" />
     </svg>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  )
+}
+
+function ItemField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-navy-300">{label}</label>
+      {children}
+    </div>
   )
 }
