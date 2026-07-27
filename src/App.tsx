@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
-import { ESTADOS, TIPOS_PAGO } from './types'
+import { ESTADOS, TIPOS_PAGO, DIRECCIONES, MEDIDAS_LLANTAS } from './types'
 import { mockApi } from './mockApi'
 
 // ============================================================
@@ -14,7 +14,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f4f5f7]">
-      {/* Header */}
       <header className="sticky top-0 z-30 border-b border-navy-100 bg-navy-500 shadow-sm">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-400 text-lg font-black text-navy-500">R</div>
@@ -28,7 +27,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tabs */}
       <nav className="sticky top-[57px] z-20 border-b border-navy-100 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-3xl">
           <TabBtn label="Ordenes" active={tab === 'ordenes'} onClick={() => setTab('ordenes')} />
@@ -38,7 +36,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Contenido */}
       <main className="mx-auto max-w-3xl px-4 py-6">
         <div key={tab + refreshKey} className="animate-fade-in">
           {tab === 'ordenes' && <OrdenesScreen refreshKey={refreshKey} />}
@@ -75,8 +72,10 @@ function ClientesScreen() {
   const [nombre, setNombre] = useState('')
   const [cedula, setCedula] = useState('')
   const [telefono, setTelefono] = useState('')
+  const [direccion, setDireccion] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [filtroDir, setFiltroDir] = useState<string>('')
 
   const cargar = useCallback(async () => {
     try {
@@ -95,8 +94,8 @@ function ClientesScreen() {
     if (!nombre.trim() || !cedula.trim()) { setError('Nombre y cedula son obligatorios'); return }
     setSaving(true); setError(null)
     try {
-      await mockApi.createCliente({ nombre, cedula, telefono: telefono || null })
-      setNombre(''); setCedula(''); setTelefono('')
+      await mockApi.createCliente({ nombre, cedula, telefono: telefono || null, direccion: direccion || null })
+      setNombre(''); setCedula(''); setTelefono(''); setDireccion('')
       setShowForm(false)
       cargar()
     } catch (e) {
@@ -105,6 +104,14 @@ function ClientesScreen() {
       setSaving(false)
     }
   }
+
+  const clientesFiltrados = filtroDir ? clientes.filter(c => c.direccion === filtroDir) : clientes
+
+  // Conteo por direccion
+  const conteoDir = DIRECCIONES.map(d => ({
+    direccion: d,
+    count: clientes.filter(c => c.direccion === d).length,
+  })).filter(d => d.count > 0)
 
   if (loading) return <LoadingView />
 
@@ -125,6 +132,14 @@ function ClientesScreen() {
           <Input label="Nombre completo *" value={nombre} onChange={setNombre} placeholder="Juan Perez" />
           <Input label="Cedula *" value={cedula} onChange={setCedula} placeholder="1700000000" />
           <Input label="Telefono" value={telefono} onChange={setTelefono} placeholder="098 765 4321" />
+          <div className="mb-3">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Direccion</label>
+            <select value={direccion} onChange={e => setDireccion(e.target.value)}
+              className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200">
+              <option value="">Seleccione...</option>
+              {DIRECCIONES.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
           <button onClick={guardar} disabled={saving}
             className="mt-2 w-full rounded-lg bg-primary-400 px-4 py-3 text-sm font-bold text-navy-500 transition hover:bg-primary-300 disabled:opacity-60">
             {saving ? 'Guardando...' : 'Guardar'}
@@ -132,15 +147,46 @@ function ClientesScreen() {
         </div>
       )}
 
-      {clientes.length === 0 ? (
+      {/* Conteo por direccion */}
+      {conteoDir.length > 0 && (
+        <div className="rounded-xl border border-navy-100 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-primary-600">Conteo por direccion</h3>
+          <div className="flex flex-wrap gap-2">
+            {conteoDir.map(d => (
+              <button key={d.direccion} onClick={() => setFiltroDir(filtroDir === d.direccion ? '' : d.direccion)}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  filtroDir === d.direccion
+                    ? 'bg-primary-400 text-navy-500'
+                    : 'bg-navy-50 text-navy-400 hover:bg-navy-100'
+                }`}>
+                {d.direccion} ({d.count})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filtro activo */}
+      {filtroDir && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-semibold text-navy-400">Filtrando por:</span>
+          <span className="rounded-full bg-primary-100 px-2 py-0.5 font-bold text-navy-500">{filtroDir}</span>
+          <button onClick={() => setFiltroDir('')} className="text-navy-200 hover:text-red-500">✕ quitar</button>
+        </div>
+      )}
+
+      {clientesFiltrados.length === 0 ? (
         <EmptyState text="No hay clientes registrados" />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {clientes.map(c => (
+          {clientesFiltrados.map(c => (
             <div key={c.id} className="rounded-xl border border-navy-100 bg-white p-4 shadow-sm">
               <p className="text-sm font-bold text-navy-500">{c.nombre}</p>
               <p className="mt-1 text-xs text-navy-300">Cedula: {c.cedula}</p>
               {c.telefono && <p className="text-xs text-navy-300">Tel: {c.telefono}</p>}
+              {c.direccion && (
+                <p className="mt-1.5 inline-block rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-400">{c.direccion}</p>
+              )}
             </div>
           ))}
         </div>
@@ -176,7 +222,13 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
   const agregarItem = () => setItems(prev => [...prev, nuevoItem()])
   const quitarItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx))
 
-  const totalEstimado = items.reduce((sum, it) => sum + (it.cantidad * it.valor_unitario), 0)
+  // Total excluye items rechazados
+  const totalEstimado = items
+    .filter(it => !it.rechazo)
+    .reduce((sum, it) => sum + (it.cantidad * it.valor_unitario), 0)
+  const totalRechazado = items
+    .filter(it => it.rechazo)
+    .reduce((sum, it) => sum + (it.cantidad * it.valor_unitario), 0)
 
   const guardar = async () => {
     if (!clienteId || !numero.trim()) { setError('Seleccione cliente e ingrese numero de orden'); return }
@@ -222,7 +274,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
       </section>
 
-      {/* Items dinamicos */}
+      {/* Items - tabla compacta */}
       <section className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-bold text-navy-500">
@@ -232,34 +284,92 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
           <button onClick={agregarItem} className="rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-navy-500 transition hover:bg-primary-100">+ Agregar</button>
         </div>
 
-        {items.map((it, idx) => (
-          <div key={idx} className="mb-4 rounded-lg border border-navy-50 bg-[#f8f9fb] p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-bold text-navy-500">Item #{idx + 1}</span>
-              {items.length > 1 && (
-                <button onClick={() => quitarItem(idx)} className="text-xs font-semibold text-red-500 hover:text-red-700">Quitar</button>
-              )}
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Input label="Marca" value={it.marca || ''} onChange={v => updateItem(idx, 'marca', v)} placeholder="Michelin" />
-              <Input label="N° Serie" value={it.n_serie || ''} onChange={v => updateItem(idx, 'n_serie', v)} placeholder="ABC123" />
-              <Input label="Media" value={it.media || ''} onChange={v => updateItem(idx, 'media', v)} placeholder="14" />
-              <Input label="Diseno" value={it.diseno || ''} onChange={v => updateItem(idx, 'diseno', v)} placeholder="Rayado" />
-              <Input label="Cantidad" value={String(it.cantidad)} onChange={v => updateItem(idx, 'cantidad', parseInt(v) || 1)} placeholder="1" type="number" />
-              <Input label="Valor unit." value={String(it.valor_unitario)} onChange={v => updateItem(idx, 'valor_unitario', parseFloat(v) || 0)} placeholder="0.00" type="number" />
-            </div>
-            <label className="mt-3 flex cursor-pointer items-center gap-2">
-              <input type="checkbox" checked={it.rechazo} onChange={e => updateItem(idx, 'rechazo', e.target.checked)}
-                className="h-4 w-4 rounded border-navy-200 text-primary-400 focus:ring-primary-300" />
-              <span className="text-xs font-medium text-navy-400">Rechazo</span>
-            </label>
-            <Input label="Observaciones del item" value={it.observaciones} onChange={v => updateItem(idx, 'observaciones', v)} placeholder="Notas..." multiline />
-          </div>
-        ))}
+        {/* Tabla compacta de items */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-navy-100 text-left text-[11px] uppercase tracking-wide text-navy-300">
+                <th className="pb-2 pr-2 font-semibold">Marca</th>
+                <th className="pb-2 px-1 font-semibold">Medida</th>
+                <th className="pb-2 px-1 font-semibold">Cant.</th>
+                <th className="pb-2 px-1 font-semibold">V. Unit.</th>
+                <th className="pb-2 px-1 font-semibold">Rech.</th>
+                <th className="pb-2 pl-1 font-semibold w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, idx) => {
+                const subtotal = it.cantidad * it.valor_unitario
+                return (
+                  <tr key={idx} className="border-b border-navy-50">
+                    <td className="py-2 pr-2">
+                      <input value={it.marca || ''} onChange={e => updateItem(idx, 'marca', e.target.value)}
+                        placeholder="Michelin"
+                        className="w-24 rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                    </td>
+                    <td className="py-2 px-1">
+                      <select value={it.media || ''} onChange={e => updateItem(idx, 'media', e.target.value)}
+                        className="w-24 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none">
+                        <option value="">Medida</option>
+                        {MEDIDAS_LLANTAS.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-2 px-1">
+                      <input type="number" value={String(it.cantidad)} onChange={e => updateItem(idx, 'cantidad', parseInt(e.target.value) || 1)}
+                        className="w-12 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                    </td>
+                    <td className="py-2 px-1">
+                      <input type="number" value={String(it.valor_unitario)} onChange={e => updateItem(idx, 'valor_unitario', parseFloat(e.target.value) || 0)}
+                        className="w-16 rounded border border-navy-100 bg-white px-1 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                    </td>
+                    <td className="py-2 px-1 text-center">
+                      <input type="checkbox" checked={it.rechazo} onChange={e => updateItem(idx, 'rechazo', e.target.checked)}
+                        className="h-4 w-4 rounded border-navy-200 text-primary-400 focus:ring-primary-300" />
+                    </td>
+                    <td className="py-2 pl-1 text-center">
+                      {items.length > 1 && (
+                        <button onClick={() => quitarItem(idx)} className="text-xs text-red-400 hover:text-red-600">✕</button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
 
-        <div className="flex items-center justify-between border-t border-navy-100 pt-3">
-          <span className="text-sm font-semibold text-navy-300">Total estimado:</span>
-          <span className="text-lg font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
+        {/* Detalle expandible opcional por item */}
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-navy-300 hover:text-navy-500">Ver detalles por item (serie, diseño, observaciones)</summary>
+          <div className="mt-3 space-y-3">
+            {items.map((it, idx) => (
+              <div key={idx} className="rounded-lg border border-navy-50 bg-[#f8f9fb] p-3">
+                <p className="mb-2 text-xs font-bold text-navy-500">Item #{idx + 1} — {it.marca || 'Sin marca'} ({it.media || 'S/M'})</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input value={it.n_serie || ''} onChange={e => updateItem(idx, 'n_serie', e.target.value)}
+                    placeholder="N° Serie" className="rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                  <input value={it.diseno || ''} onChange={e => updateItem(idx, 'diseno', e.target.value)}
+                    placeholder="Diseño" className="rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+                </div>
+                <input value={it.observaciones} onChange={e => updateItem(idx, 'observaciones', e.target.value)}
+                  placeholder="Observaciones del item" className="mt-2 w-full rounded border border-navy-100 bg-white px-2 py-1 text-xs text-navy-500 focus:border-primary-400 focus:outline-none" />
+              </div>
+            ))}
+          </div>
+        </details>
+
+        {/* Totales */}
+        <div className="mt-4 space-y-1 border-t border-navy-100 pt-3">
+          {totalRechazado > 0 && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-red-400 line-through">Rechazado (no se cobra):</span>
+              <span className="font-bold text-red-400 line-through">${totalRechazado.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-navy-300">Total a cobrar:</span>
+            <span className="text-lg font-extrabold text-navy-500">${totalEstimado.toFixed(2)}</span>
+          </div>
         </div>
       </section>
 
@@ -308,23 +418,26 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
         <EmptyState text="No hay ordenes registradas. Cree una desde la pestana Nueva." />
       ) : (
         <div className="grid gap-3">
-          {ordenes.map(o => (
-            <button key={o.id} onClick={() => setSelected(o)}
-              className="rounded-xl border border-navy-100 bg-white p-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-extrabold text-navy-500">{o.numero}</span>
-                <EstadoBadge estado={o.estado} />
-              </div>
-              <p className="mt-1 text-sm font-semibold text-navy-400">{o.cliente_nombre || 'Cliente'}</p>
-              <div className="mt-2 flex flex-wrap gap-3 text-xs text-navy-300">
-                <span>{o.items.length} items</span>
-                <span>Total: ${o.monto_total.toFixed(2)}</span>
-                {o.pagado_completo
-                  ? <span className="font-bold text-green-600">Pagado</span>
-                  : <span className="text-red-500">Pend: ${o.monto_pendiente.toFixed(2)}</span>}
-              </div>
-            </button>
-          ))}
+          {ordenes.map(o => {
+            const cantValida = o.items.filter(it => !it.rechazo).reduce((s, it) => s + it.cantidad, 0)
+            return (
+              <button key={o.id} onClick={() => setSelected(o)}
+                className="rounded-xl border border-navy-100 bg-white p-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-extrabold text-navy-500">{o.numero}</span>
+                  <EstadoBadge estado={o.estado} />
+                </div>
+                <p className="mt-1 text-sm font-semibold text-navy-400">{o.cliente_nombre || 'Cliente'}</p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-navy-300">
+                  <span>{cantValida} items validos</span>
+                  <span>Total: ${o.monto_total.toFixed(2)}</span>
+                  {o.pagado_completo
+                    ? <span className="font-bold text-green-600">Pagado</span>
+                    : <span className="text-red-500">Pend: ${o.monto_pendiente.toFixed(2)}</span>}
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -338,28 +451,41 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
   const [tipoPago, setTipoPago] = useState<string>(orden.tipo_pago || '')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [msgType, setMsgType] = useState<'success' | 'error'>('success')
   const overlayRef = useRef<HTMLDivElement>(null)
 
+  const idxActual = ESTADOS.indexOf(orden.estado)
+  const estadoSiguiente = idxActual < ESTADOS.length - 1 ? ESTADOS[idxActual + 1] : null
+  const puedeEntregar = orden.estado === 'En bodega' && orden.pagado_completo
+  const bloqueadoPorPago = orden.estado === 'En bodega' && !orden.pagado_completo
+
   const cambiarEstado = async (estado: EstadoOrden) => {
+    setSaving(true); setMsg(null)
     try {
       await mockApi.cambiarEstado(orden.id, estado)
+      setMsgType('success')
       setMsg(`Estado cambiado a: ${estado}`)
       onClose()
     } catch (e) {
+      setMsgType('error')
       setMsg(e instanceof Error ? e.message : 'Error')
+    } finally {
+      setSaving(false)
     }
   }
 
   const registrarAbono = async () => {
     const monto = parseFloat(abonoMonto)
-    if (!monto || monto <= 0) { setMsg('Ingrese un monto valido'); return }
-    setSaving(true)
+    if (!monto || monto <= 0) { setMsgType('error'); setMsg('Ingrese un monto valido'); return }
+    setSaving(true); setMsg(null)
     try {
       await mockApi.registrarAbono(orden.id, monto)
       setAbonoMonto('')
+      setMsgType('success')
       setMsg(`Abono de $${monto.toFixed(2)} registrado`)
       onClose()
     } catch (e) {
+      setMsgType('error')
       setMsg(e instanceof Error ? e.message : 'Error')
     } finally {
       setSaving(false)
@@ -368,12 +494,17 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
 
   const definirPago = async () => {
     if (!tipoPago) return
+    setSaving(true); setMsg(null)
     try {
       await mockApi.definirPago(orden.id, tipoPago as TipoPago)
-      setMsg(`Tipo de pago: ${tipoPago}`)
+      setMsgType('success')
+      setMsg(`Tipo de pago definido: ${tipoPago}`)
       onClose()
     } catch (e) {
+      setMsgType('error')
       setMsg(e instanceof Error ? e.message : 'Error')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -381,58 +512,90 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
     <div ref={overlayRef} onClick={e => { if (e.target === overlayRef.current) onClose() }}
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center">
       <div className="animate-scale-in max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl">
-        {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-extrabold text-navy-500">Orden {orden.numero}</h3>
           <button onClick={onClose} className="text-lg text-navy-200 hover:text-navy-500">✕</button>
         </div>
 
-        {msg && <div className="mb-4 rounded-lg bg-primary-50 px-3 py-2 text-xs font-medium text-navy-500">{msg}</div>}
+        {msg && (
+          <div className={`mb-4 rounded-lg px-3 py-2 text-xs font-medium ${msgType === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            {msg}
+          </div>
+        )}
 
         <p className="text-sm font-semibold text-navy-400">{orden.cliente_nombre}</p>
         <div className="mt-2"><EstadoBadge estado={orden.estado} /></div>
 
         {/* Trazabilidad */}
-        <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Trazabilidad</h4>
-        <FechaRow label="Recepcion (RC)" fecha={orden.fecha_rc} />
-        <FechaRow label="Envio fabrica (EF)" fecha={orden.fecha_ef} />
-        <FechaRow label="Retorno fabrica (RF)" fecha={orden.fecha_rf} />
-        <FechaRow label="En bodega" fecha={orden.fecha_bodega} />
-        <FechaRow label="Entrega (EC)" fecha={orden.fecha_ec} />
-
-        {/* Cambiar estado */}
-        <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Cambiar estado operativo</h4>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {ESTADOS.map(e => (
-            <button key={e} onClick={() => cambiarEstado(e)}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                orden.estado === e
-                  ? 'border-primary-400 bg-primary-400 text-navy-500'
-                  : 'border-navy-100 bg-white text-navy-400 hover:border-primary-200 hover:bg-primary-50'
-              }`}>
-              {e}
-            </button>
-          ))}
+        <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Trazabilidad (secuencial)</h4>
+        <div className="space-y-1">
+          {ESTADOS.map((e, i) => {
+            const fecha = i === 0 ? orden.fecha_rc : i === 1 ? orden.fecha_ef : i === 2 ? orden.fecha_rf : i === 3 ? orden.fecha_bodega : orden.fecha_ec
+            const completado = i <= idxActual
+            return (
+              <div key={e} className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${completado ? 'bg-green-50' : 'bg-gray-50'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${completado ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'}`}>
+                    {completado ? '✓' : i + 1}
+                  </span>
+                  <span className={completado ? 'font-bold text-green-700' : 'text-gray-400'}>{e}</span>
+                </div>
+                <span className="text-xs text-navy-300">
+                  {fecha ? new Date(fecha).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'}
+                </span>
+              </div>
+            )
+          })}
         </div>
+
+        {/* Cambiar estado - solo siguiente paso */}
+        <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Avanzar estado operativo</h4>
+        {estadoSiguiente ? (
+          <div>
+            <button onClick={() => cambiarEstado(estadoSiguiente)} disabled={saving}
+              className={`w-full rounded-lg border px-4 py-3 text-sm font-bold transition ${
+                estadoSiguiente === 'Entregado al cliente' && bloqueadoPorPago
+                  ? 'border-red-200 bg-red-50 text-red-400 cursor-not-allowed'
+                  : 'border-primary-400 bg-primary-400 text-navy-500 hover:bg-primary-300'
+              }`}>
+              {saving ? 'Procesando...' : `→ Avanzar a: ${estadoSiguiente}`}
+            </button>
+            {estadoSiguiente === 'Entregado al cliente' && bloqueadoPorPago && (
+              <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+                No se puede entregar: el pago no esta completado. Pendiente: ${orden.monto_pendiente.toFixed(2)}
+              </p>
+            )}
+            {estadoSiguiente === 'Entregado al cliente' && puedeEntregar && (orden.tipo_pago === 'Cheque' || orden.tipo_pago === 'Transferencia') && (
+              <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
+                Pago verificado ({orden.tipo_pago}). Listo para entregar.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="rounded-lg bg-green-50 px-3 py-2 text-xs font-bold text-green-600">Orden completada ✓</p>
+        )}
 
         {/* Items */}
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Items ({orden.items.length})</h4>
-        {orden.items.map((it, i) => (
-          <div key={i} className="flex items-center justify-between border-b border-navy-50 py-2">
-            <div>
-              <span className="text-sm text-navy-500">{it.cantidad}x {it.marca || 'Sin marca'} — {it.diseno || 'N/D'}</span>
-              {it.rechazo && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">RECHAZO</span>}
+        {orden.items.map((it, i) => {
+          const subtotal = it.cantidad * it.valor_unitario
+          return (
+            <div key={i} className="flex items-center justify-between border-b border-navy-50 py-2">
+              <div>
+                <span className="text-sm text-navy-500">{it.cantidad}x {it.marca || 'Sin marca'} — {it.media || 'S/M'}</span>
+                {it.rechazo && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">RECHAZO (no se cobra)</span>}
+              </div>
+              <span className={`text-sm font-bold ${it.rechazo ? 'text-red-300 line-through' : 'text-navy-500'}`}>${subtotal.toFixed(2)}</span>
             </div>
-            <span className="text-sm font-bold text-navy-500">${(it.cantidad * it.valor_unitario).toFixed(2)}</span>
-          </div>
-        ))}
+          )
+        })}
 
         {/* Pago */}
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Control de Pago</h4>
         <div className="rounded-lg bg-navy-50 p-4">
-          <PagoRow label="Total" value={orden.monto_total} color="text-navy-500" />
+          <PagoRow label="Total (sin rechazados)" value={orden.monto_total} color="text-navy-500" />
           <PagoRow label="Abonado" value={orden.monto_abonado} color="text-green-600" />
-          <PagoRow label="Pendiente" value={orden.monto_pendiente} color="text-red-500" />
+          <PagoRow label="Pendiente" value={orden.monto_pendiente} color={orden.monto_pendiente > 0 ? 'text-red-500' : 'text-green-600'} />
         </div>
 
         {/* Tipo de pago */}
@@ -442,7 +605,8 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
           <option value="">Sin definir</option>
           {TIPOS_PAGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <button onClick={definirPago} className="mt-2 w-full rounded-lg bg-navy-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-navy-600">
+        <button onClick={definirPago} disabled={saving || !tipoPago}
+          className="mt-2 w-full rounded-lg bg-navy-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-navy-600 disabled:opacity-60">
           Definir tipo de pago
         </button>
 
@@ -460,16 +624,6 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function FechaRow({ label, fecha }: { label: string; fecha?: string | null }) {
-  const texto = fecha ? new Date(fecha).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' }) : '—'
-  return (
-    <div className="flex justify-between border-b border-navy-50 py-1.5">
-      <span className="text-xs text-navy-300">{label}</span>
-      <span className="text-xs font-medium text-navy-500">{texto}</span>
     </div>
   )
 }
@@ -559,16 +713,17 @@ function ReporteScreen() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Total ordenes" value={String(resumen.total_ordenes)} />
             <StatCard label="Total items" value={String(resumen.total_cantidad)} />
-            <StatCard label="Prom. RC→RF" value={resumen.promedio_rc_rf_horas != null ? `${resumen.promedio_rc_rf_horas}h` : '—'} />
-            <StatCard label="Prom. EF→RF" value={resumen.promedio_ef_rf_horas != null ? `${resumen.promedio_ef_rf_horas}h` : '—'} />
-            <StatCard label="Prom. RC→EC" value={resumen.promedio_rc_ec_horas != null ? `${resumen.promedio_rc_ec_horas}h` : '—'} />
+            <StatCard label="Prom. RC→RF" value={resumen.promedio_rc_rf_horas != null ? `${resumen.promedio_rc_rf_horas}d` : '—'} />
+            <StatCard label="Prom. EF→RF" value={resumen.promedio_ef_rf_horas != null ? `${resumen.promedio_ef_rf_horas}d` : '—'} />
+            <StatCard label="Prom. RC→EC" value={resumen.promedio_rc_ec_horas != null ? `${resumen.promedio_rc_ec_horas}d` : '—'} />
           </div>
+          <p className="mt-3 text-xs text-navy-200">Tiempos promedio expresados en dias</p>
         </section>
       )}
 
       <button onClick={descargarExcel}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-400 px-4 py-3.5 text-sm font-bold text-navy-500 shadow-sm transition hover:bg-primary-300 active:scale-[0.99]">
-        <DownloadIcon /> Descargar Excel
+        <DownloadIcon /> Descargar reporte por cliente
       </button>
     </div>
   )

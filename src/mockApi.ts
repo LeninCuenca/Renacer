@@ -1,19 +1,19 @@
 /**
  * mockApi.ts — Capa de datos en memoria que replica exactamente el backend
  * FastAPI. Permite que la app web funcione de forma independiente en el
- * navegador sin necesidad del servidor Python. En produccion, simplemente
- * se reemplaza por llamadas fetch al backend.
+ * navegador sin necesidad del servidor Python.
  */
 
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
+import { ESTADOS } from './types'
 
 // ============================================================
 // Estado en memoria
 // ============================================================
 let clientes: Cliente[] = [
-  { id: 1, nombre: 'Juan Perez', cedula: '1711111111', telefono: '0991234567', created_at: new Date(Date.now() - 86400000 * 10).toISOString() },
-  { id: 2, nombre: 'Maria Gonzalez', cedula: '1722222222', telefono: '0987654321', created_at: new Date(Date.now() - 86400000 * 20).toISOString() },
-  { id: 3, nombre: 'Carlos Mendoza', cedula: '1733333333', telefono: '0971122334', created_at: new Date(Date.now() - 86400000 * 1).toISOString() },
+  { id: 1, nombre: 'Juan Perez', cedula: '1711111111', telefono: '0991234567', direccion: 'Azuay', created_at: new Date(Date.now() - 86400000 * 10).toISOString() },
+  { id: 2, nombre: 'Maria Gonzalez', cedula: '1722222222', telefono: '0987654321', direccion: 'Loja', created_at: new Date(Date.now() - 86400000 * 20).toISOString() },
+  { id: 3, nombre: 'Carlos Mendoza', cedula: '1733333333', telefono: '0971122334', direccion: 'Zumbi', created_at: new Date(Date.now() - 86400000 * 1).toISOString() },
 ]
 
 let ordenes: Orden[] = [
@@ -30,8 +30,8 @@ let ordenes: Orden[] = [
     observaciones: 'Cliente frecuente',
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
     items: [
-      { id: 1, orden_id: 1, marca: 'Michelin', n_serie: 'SN001', media: '14', diseno: 'Rayado', cantidad: 2, valor_unitario: 50.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 10).toISOString() },
-      { id: 2, orden_id: 1, marca: 'Pirelli', n_serie: 'SN002', media: '15', diseno: 'Cuadros', cantidad: 1, valor_unitario: 80.0, rechazo: true, observaciones: 'Defecto de fabrica', fecha_ingreso: new Date(Date.now() - 86400000 * 10).toISOString() },
+      { id: 1, orden_id: 1, marca: 'Michelin', n_serie: 'SN001', media: 'R14', diseno: 'Rayado', cantidad: 2, valor_unitario: 50.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 10).toISOString() },
+      { id: 2, orden_id: 1, marca: 'Pirelli', n_serie: 'SN002', media: 'R15', diseno: 'Cuadros', cantidad: 1, valor_unitario: 80.0, rechazo: true, observaciones: 'Defecto de fabrica', fecha_ingreso: new Date(Date.now() - 86400000 * 10).toISOString() },
     ],
   },
   {
@@ -48,7 +48,7 @@ let ordenes: Orden[] = [
     observaciones: '',
     created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
     items: [
-      { id: 3, orden_id: 2, marca: 'Goodyear', n_serie: 'SN003', media: '13', diseno: 'Liso', cantidad: 2, valor_unitario: 45.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 20).toISOString() },
+      { id: 3, orden_id: 2, marca: 'Goodyear', n_serie: 'SN003', media: 'R13', diseno: 'Liso', cantidad: 2, valor_unitario: 45.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 20).toISOString() },
     ],
   },
   {
@@ -62,7 +62,7 @@ let ordenes: Orden[] = [
     observaciones: 'Urgente',
     created_at: new Date(Date.now() - 86400000 * 1).toISOString(),
     items: [
-      { id: 4, orden_id: 3, marca: 'Bridgestone', n_serie: 'SN004', media: '16', diseno: 'Mixto', cantidad: 1, valor_unitario: 120.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 1).toISOString() },
+      { id: 4, orden_id: 3, marca: 'Bridgestone', n_serie: 'SN004', media: 'R16', diseno: 'Mixto', cantidad: 1, valor_unitario: 120.0, rechazo: false, observaciones: '', fecha_ingreso: new Date(Date.now() - 86400000 * 1).toISOString() },
     ],
   },
 ]
@@ -88,21 +88,52 @@ let nextAbonoId = 3
 // ============================================================
 // Helpers
 // ============================================================
+
+/** Recalcula montos excluyendo items rechazados del total */
 function recalcular(orden: Orden): void {
-  orden.monto_total = Math.round(orden.items.reduce((s, it) => s + it.cantidad * it.valor_unitario, 0) * 100) / 100
+  const itemsValidos = orden.items.filter(it => !it.rechazo)
+  orden.monto_total = Math.round(itemsValidos.reduce((s, it) => s + it.cantidad * it.valor_unitario, 0) * 100) / 100
   const totalAbonos = abonos.filter(a => a.orden_id === orden.id).reduce((s, a) => s + a.monto, 0)
   orden.monto_abonado = Math.round(totalAbonos * 100) / 100
   orden.monto_pendiente = Math.round((orden.monto_total - totalAbonos) * 100) / 100
-  orden.pagado_completo = orden.monto_pendiente <= 0
+  orden.pagado_completo = orden.monto_pendiente <= 0 && orden.monto_total > 0
   orden.activo_vigente = orden.pagado_completo
+}
+
+/** Verifica que el cambio de estado respete la trazabilidad secuencial */
+function validarTransicion(orden: Orden, nuevoEstado: EstadoOrden): void {
+  const idxActual = ESTADOS.indexOf(orden.estado)
+  const idxNuevo = ESTADOS.indexOf(nuevoEstado)
+  if (idxNuevo <= idxActual) {
+    throw new Error('No se puede retroceder en la trazabilidad. El estado debe avanzar secuencialmente.')
+  }
+  if (idxNuevo !== idxActual + 1) {
+    throw new Error(`Debe avanzar al estado siguiente: "${ESTADOS[idxActual + 1]}". No puede saltar pasos.`)
+  }
+}
+
+/** Verifica que el pago este completado antes de entregar */
+function verificarEntrega(orden: Orden): void {
+  if (!orden.pagado_completo) {
+    throw new Error('No se puede entregar la orden: el pago no esta completado. Registre el abono pendiente primero.')
+  }
+  const tipo = orden.tipo_pago
+  if (tipo === 'Cheque' || tipo === 'Transferencia') {
+    // Para cheque/transferencia se asume verificado al estar pagado_completo
+  }
 }
 
 function delay<T>(value: T): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), 200))
 }
 
+function diffDias(a?: string | null, b?: string | null): number | null {
+  if (a && b) return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000 * 10) / 10
+  return null
+}
+
 // ============================================================
-// API publica (mismas firmas que el backend real)
+// API publica
 // ============================================================
 export const mockApi = {
   // --- Clientes ---
@@ -110,7 +141,7 @@ export const mockApi = {
     return delay([...clientes].sort((a, b) => a.nombre.localeCompare(b.nombre)))
   },
 
-  async createCliente(data: { nombre: string; cedula: string; telefono?: string | null }): Promise<Cliente> {
+  async createCliente(data: { nombre: string; cedula: string; telefono?: string | null; direccion?: string | null }): Promise<Cliente> {
     if (clientes.some(c => c.cedula === data.cedula)) {
       throw new Error('Ya existe un cliente con esa cedula')
     }
@@ -119,6 +150,7 @@ export const mockApi = {
       nombre: data.nombre,
       cedula: data.cedula,
       telefono: data.telefono || null,
+      direccion: data.direccion || null,
       created_at: new Date().toISOString(),
     }
     clientes.push(cli)
@@ -172,23 +204,13 @@ export const mockApi = {
     return delay(JSON.parse(JSON.stringify(orden)))
   },
 
-  async addItem(ordenId: number, data: Omit<Item, 'id' | 'orden_id' | 'fecha_ingreso'>): Promise<Orden> {
-    const orden = ordenes.find(o => o.id === ordenId)
-    if (!orden) throw new Error('Orden no encontrada')
-    const item: Item = {
-      ...data,
-      id: nextItemId++,
-      orden_id: ordenId,
-      fecha_ingreso: new Date().toISOString(),
-    }
-    orden.items.push(item)
-    recalcular(orden)
-    return delay(JSON.parse(JSON.stringify(orden)))
-  },
-
   async cambiarEstado(ordenId: number, estado: EstadoOrden): Promise<Orden> {
     const orden = ordenes.find(o => o.id === ordenId)
     if (!orden) throw new Error('Orden no encontrada')
+    validarTransicion(orden, estado)
+    if (estado === 'Entregado al cliente') {
+      verificarEntrega(orden)
+    }
     const now = new Date().toISOString()
     orden.estado = estado
     if (estado === 'Recepcion') orden.fecha_rc = now
@@ -234,26 +256,21 @@ export const mockApi = {
       return c >= inicio && c < fin
     })
 
-    const diffHoras = (a?: string | null, b?: string | null): number | null => {
-      if (a && b) return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 3600000 * 10) / 10
-      return null
-    }
-
-    const rcRf = filtradas.map(o => diffHoras(o.fecha_rc, o.fecha_rf)).filter((v): v is number => v != null)
-    const efRf = filtradas.map(o => diffHoras(o.fecha_ef, o.fecha_rf)).filter((v): v is number => v != null)
-    const rcEc = filtradas.map(o => diffHoras(o.fecha_rc, o.fecha_ec)).filter((v): v is number => v != null)
+    const rcRf = filtradas.map(o => diffDias(o.fecha_rc, o.fecha_rf)).filter((v): v is number => v != null)
+    const efRf = filtradas.map(o => diffDias(o.fecha_ef, o.fecha_rf)).filter((v): v is number => v != null)
+    const rcEc = filtradas.map(o => diffDias(o.fecha_rc, o.fecha_ec)).filter((v): v is number => v != null)
 
     return delay({
       anio, mes,
       total_ordenes: filtradas.length,
-      total_cantidad: filtradas.reduce((s, o) => s + o.items.reduce((si, it) => si + it.cantidad, 0), 0),
+      total_cantidad: filtradas.reduce((s, o) => s + o.items.filter(it => !it.rechazo).reduce((si, it) => si + it.cantidad, 0), 0),
       promedio_rc_rf_horas: rcRf.length ? Math.round(rcRf.reduce((a, b) => a + b, 0) / rcRf.length * 10) / 10 : null,
       promedio_ef_rf_horas: efRf.length ? Math.round(efRf.reduce((a, b) => a + b, 0) / efRf.length * 10) / 10 : null,
       promedio_rc_ec_horas: rcEc.length ? Math.round(rcEc.reduce((a, b) => a + b, 0) / rcEc.length * 10) / 10 : null,
     })
   },
 
-  // Excel: en modo web, generamos un CSV descargable
+  /** Exporta un CSV con una seccion por cliente (no general) */
   async downloadExcel(anio: number, mes: number): Promise<void> {
     const inicio = new Date(anio, mes - 1, 1)
     const fin = new Date(mes === 12 ? anio + 1 : anio, mes === 12 ? 0 : mes, 1)
@@ -262,38 +279,69 @@ export const mockApi = {
       return c >= inicio && c < fin
     })
 
-    const fmt = (d?: string | null) => d ? new Date(d).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' }) : ''
+    const fmt = (d?: string | null) => d ? new Date(d).toLocaleDateString('es-EC', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
     const diff = (a?: string | null, b?: string | null) => {
-      if (a && b) return String(Math.round((new Date(b).getTime() - new Date(a).getTime()) / 3600000 * 10) / 10)
+      if (a && b) return String(Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000 * 10) / 10)
       return ''
     }
 
-    const headers = ['Cantidad', 'Cliente', 'Numero de orden', 'Recepcion de carcasa (RC)', 'Envio a fabrica (EF)', 'Retorno de fabrica (RF)', 'Entrega cliente (EC)', 'Promedio RC-RF (horas)', 'Promedio EF-RF (horas)', 'Promedio RC-EC (horas)', 'Observaciones']
-    const rows = filtradas.map(o => [
-      o.items.reduce((s, it) => s + it.cantidad, 0),
-      o.cliente_nombre || '',
-      o.numero,
-      fmt(o.fecha_rc), fmt(o.fecha_ef), fmt(o.fecha_rf), fmt(o.fecha_ec),
-      diff(o.fecha_rc, o.fecha_rf),
-      diff(o.fecha_ef, o.fecha_rf),
-      diff(o.fecha_rc, o.fecha_ec),
-      '',
-    ])
+    const lines: string[] = []
+    lines.push(`"Reporte Renacer - ${String(mes).padStart(2, '0')}/${anio}"`)
+    lines.push('')
 
-    // Fila total
-    const rcRf = rows.map(r => Number(r[7])).filter(v => !isNaN(v) && v !== 0)
-    const efRf = rows.map(r => Number(r[8])).filter(v => !isNaN(v) && v !== 0)
-    const rcEc = rows.map(r => Number(r[9])).filter(v => !isNaN(v) && v !== 0)
-    rows.push([
-      rows.reduce((s, r) => s + Number(r[0]), 0),
-      'TOTAL', '', '', '', '', '',
-      rcRf.length ? String(Math.round(rcRf.reduce((a, b) => a + b, 0) / rcRf.length * 10) / 10) : '',
-      efRf.length ? String(Math.round(efRf.reduce((a, b) => a + b, 0) / efRf.length * 10) / 10) : '',
-      rcEc.length ? String(Math.round(rcEc.reduce((a, b) => a + b, 0) / rcEc.length * 10) / 10) : '',
-      '',
-    ])
+    // Agrupar por cliente
+    const porCliente = new Map<number, Orden[]>()
+    for (const o of filtradas) {
+      const arr = porCliente.get(o.cliente_id) || []
+      arr.push(o)
+      porCliente.set(o.cliente_id, arr)
+    }
 
-    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const headers = ['Cliente', 'N° Orden', 'Cantidad (items validos)', 'Recepcion (RC)', 'Envio fabrica (EF)', 'Retorno fabrica (RF)', 'Entrega (EC)', 'Dias RC-RF', 'Dias EF-RF', 'Dias RC-EC', 'Total', 'Abonado', 'Pendiente', 'Estado']
+
+    for (const [cliId, ords] of porCliente) {
+      const cli = clientes.find(c => c.id === cliId)
+      const cliNombre = cli?.nombre || 'Desconocido'
+      const cliDir = cli?.direccion || ''
+      lines.push(`"CLIENTE: ${cliNombre}"`)
+      if (cliDir) lines.push(`"Direccion: ${cliDir}"`)
+      lines.push(headers.map(h => `"${h}"`).join(','))
+
+      let totCant = 0, totTotal = 0, totAbonado = 0, totPendiente = 0
+      const rcRfVals: number[] = [], efRfVals: number[] = [], rcEcVals: number[] = []
+
+      for (const o of ords) {
+        const cantValida = o.items.filter(it => !it.rechazo).reduce((s, it) => s + it.cantidad, 0)
+        totCant += cantValida
+        totTotal += o.monto_total
+        totAbonado += o.monto_abonado
+        totPendiente += o.monto_pendiente
+
+        const dRcRf = diffDias(o.fecha_rc, o.fecha_rf); if (dRcRf != null) rcRfVals.push(dRcRf)
+        const dEfRf = diffDias(o.fecha_ef, o.fecha_rf); if (dEfRf != null) efRfVals.push(dEfRf)
+        const dRcEc = diffDias(o.fecha_rc, o.fecha_ec); if (dRcEc != null) rcEcVals.push(dRcEc)
+
+        lines.push([
+          cliNombre, o.numero, String(cantValida),
+          fmt(o.fecha_rc), fmt(o.fecha_ef), fmt(o.fecha_rf), fmt(o.fecha_ec),
+          diff(o.fecha_rc, o.fecha_rf), diff(o.fecha_ef, o.fecha_rf), diff(o.fecha_rc, o.fecha_ec),
+          o.monto_total.toFixed(2), o.monto_abonado.toFixed(2), o.monto_pendiente.toFixed(2),
+          o.estado,
+        ].map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      }
+
+      // Fila de totales del cliente
+      lines.push([
+        `"TOTAL ${cliNombre}"`, '', String(totCant), '', '', '', '',
+        rcRfVals.length ? String(Math.round(rcRfVals.reduce((a, b) => a + b, 0) / rcRfVals.length * 10) / 10) : '',
+        efRfVals.length ? String(Math.round(efRfVals.reduce((a, b) => a + b, 0) / efRfVals.length * 10) / 10) : '',
+        rcEcVals.length ? String(Math.round(rcEcVals.reduce((a, b) => a + b, 0) / rcEcVals.length * 10) / 10) : '',
+        totTotal.toFixed(2), totAbonado.toFixed(2), totPendiente.toFixed(2), '',
+      ].join(','))
+      lines.push('')
+    }
+
+    const csv = lines.join('\n')
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
