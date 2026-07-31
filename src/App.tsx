@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
 import { ESTADOS, TIPOS_PAGO, DIRECCIONES, MEDIDAS_LLANTAS, diasDeCredito, calcularFechaVencimiento, esFeriado, esFinDeSemana } from './types'
-import { mockApi } from './mockApi'
+import { supabaseApi } from './supabaseApi'
 
 // ============================================================
 // App principal
@@ -14,7 +14,7 @@ export default function App() {
   const [alertasCount, setAlertasCount] = useState(0)
 
   useEffect(() => {
-    mockApi.getCreditosPorVencer().then(alertas => {
+    supabaseApi.getCreditosPorVencer().then(alertas => {
       setAlertasCount(alertas.filter(a => a.porVencer || a.vencido).length)
     }).catch(() => {})
   }, [refreshKey])
@@ -22,8 +22,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#f4f5f7]">
       <header className="sticky top-0 z-30 border-b border-navy-100 bg-navy-500 shadow-sm">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-400 text-lg font-black text-navy-500">R</div>
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2">
+          <img src="/logo.svg" alt="Renacer" className="h-12 w-12 object-contain"/>
           <div>
             <h1 className="text-base font-bold leading-tight text-white">Renacer</h1>
             <p className="text-[11px] leading-tight text-navy-100">Registro Operativo</p>
@@ -84,6 +84,7 @@ function ClientesScreen() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editando, setEditando] = useState<Cliente | null>(null)
   const [nombre, setNombre] = useState('')
   const [cedula, setCedula] = useState('')
   const [telefono, setTelefono] = useState('')
@@ -91,10 +92,11 @@ function ClientesScreen() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filtroDir, setFiltroDir] = useState<string>('')
+  const [mostrarInactivos, setMostrarInactivos] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
-      const data = await mockApi.getClientes()
+      const data = await supabaseApi.getClientes()
       setClientes(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar')
@@ -105,14 +107,52 @@ function ClientesScreen() {
 
   useEffect(() => { cargar() }, [cargar])
 
+  const abrirNuevo = () => {
+    setEditando(null)
+    setNombre(''); setCedula(''); setTelefono(''); setDireccion('')
+    setShowForm(true); setError(null)
+  }
+
+  const abrirEditar = (c: Cliente) => {
+    setEditando(c)
+    setNombre(c.nombre); setCedula(c.cedula)
+    setTelefono(c.telefono || ''); setDireccion(c.direccion || '')
+    setShowForm(true); setError(null)
+  }
+
+  const cancelar = () => {
+    setShowForm(false); setEditando(null)
+    setNombre(''); setCedula(''); setTelefono(''); setDireccion('')
+    setError(null)
+  }
+
+  const validar = (): boolean => {
+    if (!nombre.trim()) { setError('El nombre del cliente es obligatorio'); return false }
+    if (!cedula.trim()) { setError('La cédula o RUC es obligatorio'); return false }
+    const cedulaLimpia = cedula.trim().replace(/\s/g, '')
+    if (!/^\d{10}$/.test(cedulaLimpia) && !/^\d{13}$/.test(cedulaLimpia)) {
+      setError('Ingrese una cédula válida (10 dígitos) o un RUC válido (13 dígitos)'); return false
+    }
+    if (telefono.trim() && !/^[\d\s\-\+\(\)]{7,15}$/.test(telefono.trim())) {
+      setError('El número de teléfono no es válido'); return false
+    }
+    return true
+  }
+
   const guardar = async () => {
-    if (!nombre.trim() || !cedula.trim()) { setError('Nombre y cedula son obligatorios'); return }
+    if (!validar()) return
+    const cedulaLimpia = cedula.trim().replace(/\s/g, '')
     setSaving(true); setError(null)
     try {
-      await mockApi.createCliente({ nombre, cedula, telefono: telefono || null, direccion: direccion || null })
-      setNombre(''); setCedula(''); setTelefono(''); setDireccion('')
-      setShowForm(false)
-      cargar()
+      if (editando) {
+        await supabaseApi.updateCliente(editando.id, {
+          nombre: nombre.trim(), cedula: cedulaLimpia,
+          telefono: telefono || null, direccion: direccion || null,
+        })
+      } else {
+        await supabaseApi.createCliente({ nombre: nombre.trim(), cedula: cedulaLimpia, telefono: telefono || null, direccion: direccion || null })
+      }
+      cancelar(); cargar()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar')
     } finally {
@@ -120,8 +160,26 @@ function ClientesScreen() {
     }
   }
 
-  const clientesFiltrados = filtroDir ? clientes.filter(c => c.direccion === filtroDir) : clientes
-  const conteoDir = DIRECCIONES.map(d => ({ direccion: d, count: clientes.filter(c => c.direccion === d).length })).filter(d => d.count > 0)
+  const toggleActivo = async (c: Cliente) => {
+    const nuevoEstado = !(c.activo !== false)
+    const accion = nuevoEstado ? 'activar' : 'desactivar'
+    if (!window.confirm(`¿Desea ${accion} al cliente "${c.nombre}"?`)) return
+    try {
+      await supabaseApi.toggleActivoCliente(c.id, nuevoEstado)
+      cargar()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Error al ${accion}`)
+    }
+  }
+
+  const clientesActivos = clientes.filter(c => c.activo !== false)
+  const clientesInactivos = clientes.filter(c => c.activo === false)
+  const clientesMostrados = (mostrarInactivos ? clientesInactivos : clientesActivos)
+    .filter(c => filtroDir ? c.direccion === filtroDir : true)
+  const conteoDir = DIRECCIONES.map(d => ({
+    direccion: d,
+    count: clientesActivos.filter(c => c.direccion === d).length
+  })).filter(d => d.count > 0)
 
   if (loading) return <LoadingView />
 
@@ -129,19 +187,23 @@ function ClientesScreen() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-navy-500">Clientes</h2>
-        <button onClick={() => setShowForm(!showForm)} className="rounded-lg bg-primary-400 px-4 py-2 text-sm font-bold text-navy-500 transition hover:bg-primary-300">
-          {showForm ? 'Cancelar' : '+ Nuevo'}
+        <button onClick={abrirNuevo} className="rounded-lg bg-primary-400 px-4 py-2 text-sm font-bold text-navy-500 transition hover:bg-primary-300">
+          + Nuevo
         </button>
       </div>
 
       {error && <ErrorBox message={error} onClose={() => setError(null)} />}
 
+      {/* Formulario crear / editar */}
       {showForm && (
         <div className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-sm font-bold text-navy-500">Nuevo Cliente</h3>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-navy-500">{editando ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
+            <button onClick={cancelar} className="text-sm text-navy-200 hover:text-navy-500">✕ Cancelar</button>
+          </div>
           <Input label="Nombre completo *" value={nombre} onChange={setNombre} placeholder="Juan Perez" />
-          <Input label="Cedula *" value={cedula} onChange={setCedula} placeholder="1700000000" />
-          <Input label="Telefono" value={telefono} onChange={setTelefono} placeholder="098 765 4321" />
+          <Input label="Cedula / RUC *" value={cedula} onChange={v => setCedula(v.replace(/\D/g, '').slice(0, 13))} placeholder="1700000000 o 1700000000001" type="tel" inputMode="numeric" pattern="[0-9]*" hint={cedula.length === 10 ? '✓ Cédula (10 dígitos)' : cedula.length === 13 ? '✓ RUC (13 dígitos)' : cedula.length > 0 ? `${cedula.length}/10 o 13 dígitos` : undefined} />
+          <Input label="Telefono" value={telefono} onChange={setTelefono} placeholder="098 765 4321" type="tel" inputMode="numeric" pattern="[0-9]*" />
           <div className="mb-3">
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Direccion</label>
             <select value={direccion} onChange={e => setDireccion(e.target.value)}
@@ -152,12 +214,24 @@ function ClientesScreen() {
           </div>
           <button onClick={guardar} disabled={saving}
             className="mt-2 w-full rounded-lg bg-primary-400 px-4 py-3 text-sm font-bold text-navy-500 transition hover:bg-primary-300 disabled:opacity-60">
-            {saving ? 'Guardando...' : 'Guardar'}
+            {saving ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar'}
           </button>
         </div>
       )}
 
-      {conteoDir.length > 0 && (
+      {/* Tabs activos / inactivos */}
+      <div className="flex gap-2">
+        <button onClick={() => { setMostrarInactivos(false); setFiltroDir('') }}
+          className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${!mostrarInactivos ? 'bg-navy-500 text-white' : 'bg-navy-50 text-navy-400 hover:bg-navy-100'}`}>
+          Activos ({clientesActivos.length})
+        </button>
+        <button onClick={() => { setMostrarInactivos(true); setFiltroDir('') }}
+          className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${mostrarInactivos ? 'bg-red-500 text-white' : 'bg-navy-50 text-navy-400 hover:bg-navy-100'}`}>
+          Inactivos ({clientesInactivos.length})
+        </button>
+      </div>
+
+      {!mostrarInactivos && conteoDir.length > 0 && (
         <div className="rounded-xl border border-navy-100 bg-white p-4 shadow-sm">
           <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-primary-600">Conteo por direccion</h3>
           <div className="flex flex-wrap gap-2">
@@ -179,18 +253,150 @@ function ClientesScreen() {
         </div>
       )}
 
-      {clientesFiltrados.length === 0 ? (
-        <EmptyState text="No hay clientes registrados" />
+      {clientesMostrados.length === 0 ? (
+        <EmptyState text={mostrarInactivos ? 'No hay clientes inactivos' : 'No hay clientes registrados'} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {clientesFiltrados.map(c => (
-            <div key={c.id} className="rounded-xl border border-navy-100 bg-white p-4 shadow-sm">
-              <p className="text-sm font-bold text-navy-500">{c.nombre}</p>
-              <p className="mt-1 text-xs text-navy-300">Cedula: {c.cedula}</p>
-              {c.telefono && <p className="text-xs text-navy-300">Tel: {c.telefono}</p>}
-              {c.direccion && <p className="mt-1.5 inline-block rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-400">{c.direccion}</p>}
+          {clientesMostrados.map(c => (
+            <div key={c.id} className={`rounded-xl border bg-white p-4 shadow-sm ${c.activo === false ? 'border-red-100 opacity-70' : 'border-navy-100'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-bold text-navy-500">{c.nombre}</p>
+                    {c.activo === false && (
+                      <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-600">INACTIVO</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-navy-300">Cédula/RUC: {c.cedula}</p>
+                  {c.telefono && <p className="text-xs text-navy-300">Tel: {c.telefono}</p>}
+                  {c.direccion && <p className="mt-1.5 inline-block rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-400">{c.direccion}</p>}
+                </div>
+                <div className="flex shrink-0 flex-col gap-1.5">
+                  <button onClick={() => abrirEditar(c)}
+                    className="rounded-lg bg-navy-50 px-2.5 py-1.5 text-[11px] font-bold text-navy-500 hover:bg-primary-100 transition">
+                    ✏️ Editar
+                  </button>
+                  <button onClick={() => toggleActivo(c)}
+                    className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition ${c.activo === false ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}>
+                    {c.activo === false ? '✓ Activar' : '⊘ Desactivar'}
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// Componente: Buscador de clientes
+// ============================================================
+function ClienteSearchSelect({
+  clientes,
+  clienteId,
+  onSelect,
+}: {
+  clientes: Cliente[]
+  clienteId: number
+  onSelect: (id: number) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  const clienteSeleccionado = clientes.find(c => c.id === clienteId) || null
+
+  const filtrados = query.trim().length === 0
+    ? clientes
+    : clientes.filter(c => {
+        const q = query.toLowerCase()
+        return c.nombre.toLowerCase().includes(q) || c.cedula.includes(q)
+      })
+
+  // Cerrar al tocar fuera
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const seleccionar = (c: Cliente) => {
+    onSelect(c.id)
+    setQuery('')
+    setOpen(false)
+  }
+
+  const limpiar = () => {
+    onSelect(0)
+    setQuery('')
+    setOpen(false)
+  }
+
+  return (
+    <div className="mb-4" ref={wrapperRef}>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Cliente *</label>
+
+      {/* Cliente seleccionado */}
+      {clienteSeleccionado && !open ? (
+        <div className="flex items-center justify-between rounded-lg border border-green-300 bg-green-50 px-3 py-2.5">
+          <div>
+            <p className="text-sm font-bold text-navy-500">{clienteSeleccionado.nombre}</p>
+            <p className="text-xs text-navy-300">{clienteSeleccionado.cedula}{clienteSeleccionado.direccion ? ` · ${clienteSeleccionado.direccion}` : ''}</p>
+          </div>
+          <button onClick={limpiar}
+            className="ml-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-navy-300 hover:bg-red-50 hover:text-red-500 transition">
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          {/* Input de busqueda */}
+          <div className="flex items-center rounded-lg border border-navy-100 bg-white px-3 focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-200">
+            <svg className="mr-2 h-4 w-4 shrink-0 text-navy-300" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
+            <input
+              autoFocus={open}
+              value={query}
+              onChange={e => { setQuery(e.target.value); setOpen(true) }}
+              onFocus={() => setOpen(true)}
+              placeholder="Buscar por nombre o cedula..."
+              className="w-full py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:outline-none bg-transparent"
+            />
+            {query && (
+              <button onClick={() => setQuery('')} className="ml-1 text-navy-200 hover:text-navy-500">✕</button>
+            )}
+          </div>
+
+          {/* Dropdown de resultados */}
+          {open && (
+            <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-xl border border-navy-100 bg-white shadow-lg">
+              {filtrados.length === 0 ? (
+                <div className="px-4 py-6 text-center text-xs text-navy-200">
+                  Sin resultados para «{query}»
+                </div>
+              ) : (
+                filtrados.map(c => (
+                  <button key={c.id} onClick={() => seleccionar(c)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-primary-50 active:bg-primary-100 border-b border-navy-50 last:border-0">
+                    <div>
+                      <p className="text-sm font-bold text-navy-500">{c.nombre}</p>
+                      <p className="text-xs text-navy-300">{c.cedula}{c.direccion ? ` · ${c.direccion}` : ''}</p>
+                    </div>
+                    <svg className="h-4 w-4 shrink-0 text-navy-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -220,7 +426,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
   const [fObs, setFObs] = useState('')
   const [fRechazo, setFRechazo] = useState(false)
 
-  useEffect(() => { mockApi.getClientes().then(setClientes).catch(() => {}) }, [])
+  useEffect(() => { supabaseApi.getClientes().then(setClientes).catch(() => {}) }, [])
 
   const limpiarFormulario = () => {
     setFMarca(''); setFSerie(''); setFMedia(''); setFDiseno('')
@@ -255,7 +461,7 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
     if (items.length === 0) { setError('Agregue al menos una llanta'); return }
     setSaving(true); setError(null)
     try {
-      await mockApi.createOrden({
+      await supabaseApi.createOrden({
         numero, cliente_id: clienteId, observaciones,
         items: items.map(it => ({
           marca: it.marca || null, n_serie: it.n_serie || null,
@@ -282,14 +488,11 @@ function NuevaOrdenScreen({ onCreated }: { onCreated: () => void }) {
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-400 text-xs font-bold text-navy-500">1</span>
           Datos Generales
         </h3>
-        <div className="mb-4">
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Cliente *</label>
-          <select value={clienteId} onChange={e => setClienteId(Number(e.target.value))}
-            className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200">
-            <option value={0}>Seleccione...</option>
-            {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre} — {c.cedula}</option>)}
-          </select>
-        </div>
+        <ClienteSearchSelect
+          clientes={clientes}
+          clienteId={clienteId}
+          onSelect={setClienteId}
+        />
         <Input label="Numero de orden *" value={numero} onChange={setNumero} placeholder="OT-0001" />
         <Input label="Observaciones" value={observaciones} onChange={setObservaciones} placeholder="Notas..." multiline />
       </section>
@@ -445,16 +648,23 @@ interface AlertaCredito {
 
 function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
   const [ordenes, setOrdenes] = useState<Orden[]>([])
+  const [clientes, setClientes] = useState<Cliente[]>([])
   const [alertas, setAlertas] = useState<AlertaCredito[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Orden | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busqueda, setBusqueda] = useState('')
 
   const cargar = useCallback(async () => {
     try {
-      const [data, al] = await Promise.all([mockApi.getOrdenes(), mockApi.getCreditosPorVencer()])
+      const [data, al, clientesData] = await Promise.all([
+        supabaseApi.getOrdenes(),
+        supabaseApi.getCreditosPorVencer(),
+        supabaseApi.getClientes(),
+      ])
       setOrdenes(data)
       setAlertas(al)
+      setClientes(clientesData)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar')
     } finally {
@@ -468,12 +678,50 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
 
   const alertasActivas = alertas.filter(a => a.porVencer || a.vencido)
 
+  // Filtro de búsqueda
+  const q = busqueda.trim().toLowerCase()
+  const ordenesFiltradas = q === ''
+    ? ordenes
+    : ordenes.filter(o => {
+        if (o.numero.toLowerCase().includes(q)) return true
+        if ((o.cliente_nombre || '').toLowerCase().includes(q)) return true
+        // Buscar por cédula/RUC del cliente
+        const cliente = clientes.find(c => c.id === o.cliente_id)
+        if (cliente && cliente.cedula.includes(q)) return true
+        return false
+      })
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-navy-500">Ordenes de Trabajo</h2>
         <button onClick={cargar} className="text-xs font-semibold text-navy-300 hover:text-navy-500">↻ Refrescar</button>
       </div>
+
+      {/* Buscador */}
+      <div className="flex items-center rounded-xl border border-navy-100 bg-white px-3 shadow-sm focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-200">
+        <svg className="mr-2 h-4 w-4 shrink-0 text-navy-300" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+        </svg>
+        <input
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar por Nº orden, nombre o cédula/RUC..."
+          className="w-full py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:outline-none bg-transparent"
+        />
+        {busqueda && (
+          <button onClick={() => setBusqueda('')} className="ml-1 shrink-0 text-navy-200 hover:text-navy-500">✕</button>
+        )}
+      </div>
+
+      {busqueda && (
+        <p className="text-xs text-navy-300">
+          {ordenesFiltradas.length === 0
+            ? `Sin resultados para «${busqueda}»`
+            : `${ordenesFiltradas.length} resultado${ordenesFiltradas.length !== 1 ? 's' : ''} para «${busqueda}»`
+          }
+        </p>
+      )}
 
       {error && <ErrorBox message={error} onClose={() => setError(null)} />}
 
@@ -510,13 +758,33 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
-      {ordenes.length === 0 ? (
+      {ordenesFiltradas.length === 0 && busqueda === '' ? (
         <EmptyState text="No hay ordenes registradas. Cree una desde la pestana Nueva." />
+      ) : ordenesFiltradas.length === 0 ? (
+        <EmptyState text={`Sin resultados para «${busqueda}». Intente con otro término.`} />
       ) : (
         <div className="grid gap-3">
-          {ordenes.map(o => {
+          {ordenesFiltradas.map(o => {
             const cantValida = o.items.filter(it => !it.rechazo).reduce((s, it) => s + it.cantidad, 0)
             const alerta = alertas.find(a => a.orden.id === o.id)
+
+            // Calcular etiqueta de fecha relativa
+            const fechaCreacion = o.created_at ? new Date(o.created_at) : null
+            let fechaRelativa = ''
+            let fechaCorta = ''
+            if (fechaCreacion) {
+              fechaCorta = fechaCreacion.toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' })
+              const hoy = new Date()
+              const diffMs = hoy.getTime() - fechaCreacion.getTime()
+              const diffDias = Math.floor(diffMs / 86400000)
+              if (diffDias === 0) fechaRelativa = 'Hoy'
+              else if (diffDias === 1) fechaRelativa = 'Ayer'
+              else if (diffDias < 7) fechaRelativa = `Hace ${diffDias} días`
+              else if (diffDias < 30) fechaRelativa = `Hace ${Math.floor(diffDias / 7)} sem.`
+              else if (diffDias < 365) fechaRelativa = `Hace ${Math.floor(diffDias / 30)} mes.`
+              else fechaRelativa = `Hace ${Math.floor(diffDias / 365)} año(s)`
+            }
+
             return (
               <button key={o.id} onClick={() => setSelected(o)}
                 className="rounded-xl border border-navy-100 bg-white p-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md">
@@ -525,13 +793,21 @@ function OrdenesScreen({ refreshKey }: { refreshKey: number }) {
                   <EstadoBadge estado={o.estado} />
                 </div>
                 <p className="mt-1 text-sm font-semibold text-navy-400">{o.cliente_nombre || 'Cliente'}</p>
-                <div className="mt-2 flex flex-wrap gap-3 text-xs text-navy-300">
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-navy-300">
                   <span>{cantValida} items validos</span>
                   <span>Total: ${o.monto_total.toFixed(2)}</span>
                   {o.pagado_completo
                     ? <span className="font-bold text-green-600">Pagado</span>
                     : <span className="text-red-500">Pend: ${o.monto_pendiente.toFixed(2)}</span>}
                 </div>
+                {fechaCreacion && (
+                  <div className="mt-2 flex items-center gap-1.5 text-[11px] text-navy-200">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span className="font-semibold">{fechaRelativa}</span>
+                    <span>·</span>
+                    <span>{fechaCorta}</span>
+                  </div>
+                )}
                 {alerta && (alerta.porVencer || alerta.vencido) && (
                   <div className={`mt-2 rounded-lg px-2 py-1 text-xs font-bold ${alerta.vencido ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'}`}>
                     {alerta.vencido ? `Credito vencido hace ${Math.abs(alerta.diasRestantes)} dias` : `Credito vence en ${alerta.diasRestantes} dias`}
@@ -555,7 +831,20 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
   const [msg, setMsg] = useState<string | null>(null)
   const [msgType, setMsgType] = useState<'success' | 'error'>('success')
   const [fechaVencPreview, setFechaVencPreview] = useState<string | null>(orden.fecha_vencimiento || null)
+  const [historialAbonos, setHistorialAbonos] = useState<any[]>([])
+  const [loadingAbonos, setLoadingAbonos] = useState(true)
   const overlayRef = useRef<HTMLDivElement>(null)
+
+  // Cargar historial de abonos
+  const cargarAbonos = async () => {
+    try {
+      const data = await supabaseApi.getAbonos(orden.id)
+      setHistorialAbonos(data)
+    } catch (_) {}
+    finally { setLoadingAbonos(false) }
+  }
+
+  useEffect(() => { cargarAbonos() }, [])
 
   const idxActual = ESTADOS.indexOf(orden.estado)
   const estadoSiguiente = idxActual < ESTADOS.length - 1 ? ESTADOS[idxActual + 1] : null
@@ -565,7 +854,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
   const cambiarEstado = async (estado: EstadoOrden) => {
     setSaving(true); setMsg(null)
     try {
-      await mockApi.cambiarEstado(orden.id, estado)
+      await supabaseApi.updateOrdenEstado(orden.id, estado)
       setMsgType('success')
       setMsg(`Estado cambiado a: ${estado}`)
       onClose()
@@ -582,11 +871,12 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
     if (!monto || monto <= 0) { setMsgType('error'); setMsg('Ingrese un monto valido'); return }
     setSaving(true); setMsg(null)
     try {
-      await mockApi.registrarAbono(orden.id, monto)
+      await supabaseApi.createAbono({ orden_id: orden.id, monto })
       setAbonoMonto('')
       setMsgType('success')
-      setMsg(`Abono de $${monto.toFixed(2)} registrado`)
-      onClose()
+      setMsg(`Abono de $${monto.toFixed(2)} registrado correctamente`)
+      // Recargar historial sin cerrar el modal
+      await cargarAbonos()
     } catch (e) {
       setMsgType('error')
       setMsg(e instanceof Error ? e.message : 'Error')
@@ -599,7 +889,7 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
     if (!tipoPago) return
     setSaving(true); setMsg(null)
     try {
-      const actualizada = await mockApi.definirPago(orden.id, tipoPago as TipoPago)
+      const actualizada = await supabaseApi.setPagoPago(orden.id, tipoPago as TipoPago)
       setFechaVencPreview(actualizada.fecha_vencimiento || null)
       setMsgType('success')
       const dias = diasDeCredito(tipoPago)
@@ -751,11 +1041,58 @@ function OrdenDetalleModal({ orden, onClose }: { orden: Orden; onClose: () => vo
 
         {/* Abono */}
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Registrar abono</h4>
-        <Input label="Monto del abono" value={abonoMonto} onChange={setAbonoMonto} placeholder="0.00" type="number" />
-        <button onClick={registrarAbono} disabled={saving}
-          className="mt-2 w-full rounded-lg bg-primary-400 px-4 py-3 text-sm font-bold text-navy-500 transition hover:bg-primary-300 disabled:opacity-60">
-          {saving ? 'Procesando...' : 'Registrar abono'}
-        </button>
+
+        {/* Historial de abonos */}
+        {loadingAbonos ? (
+          <p className="mb-3 text-xs text-navy-200">Cargando historial...</p>
+        ) : historialAbonos.length > 0 ? (
+          <div className="mb-3 rounded-xl border border-navy-100 bg-navy-50 overflow-hidden">
+            <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-navy-300">Historial de abonos ({historialAbonos.length})</p>
+            <div className="divide-y divide-navy-100">
+              {historialAbonos.map((a, i) => (
+                <div key={a.id || i} className="flex items-center justify-between px-3 py-2">
+                  <div>
+                    <p className="text-xs font-bold text-green-600">+${Number(a.monto).toFixed(2)}</p>
+                    {a.descripcion && <p className="text-[10px] text-navy-300">{a.descripcion}</p>}
+                  </div>
+                  <p className="text-[11px] text-navy-300">
+                    {a.fecha
+                      ? new Date(a.fecha).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : '—'
+                    }
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between border-t border-navy-100 bg-white px-3 py-2">
+              <span className="text-xs font-bold text-navy-400">Total abonado:</span>
+              <span className="text-xs font-bold text-green-600">${historialAbonos.reduce((s, a) => s + Number(a.monto), 0).toFixed(2)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="mb-3 rounded-lg bg-navy-50 px-3 py-2 text-xs text-navy-300">Sin abonos registrados aún.</p>
+        )}
+
+        {/* Campo y botón de nuevo abono */}
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              step="0.01"
+              min="0"
+              value={abonoMonto}
+              onChange={e => setAbonoMonto(e.target.value)}
+              placeholder="0.00"
+              className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200"
+            />
+          </div>
+          <button onClick={registrarAbono} disabled={saving || !abonoMonto}
+            className="shrink-0 rounded-lg bg-primary-400 px-4 py-2.5 text-sm font-bold text-navy-500 transition hover:bg-primary-300 disabled:opacity-60">
+            {saving ? '...' : '+ Abonar'}
+          </button>
+        </div>
 
         {orden.activo_vigente && (
           <div className="mt-4 rounded-lg bg-green-50 px-4 py-3 text-center text-sm font-bold text-green-600">
@@ -801,7 +1138,7 @@ function ReporteScreen() {
   const cargarResumen = async () => {
     setLoading(true); setError(null)
     try {
-      const data = await mockApi.getResumen(anio, mes)
+      const data = await supabaseApi.getResumenMensual(anio, mes)
       setResumen(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar resumen')
@@ -812,7 +1149,13 @@ function ReporteScreen() {
 
   useEffect(() => { cargarResumen() }, [])
 
-  const descargarExcel = () => { mockApi.downloadExcel(anio, mes) }
+  const descargarExcel = async () => {
+    try {
+      await supabaseApi.exportarExcelMensual(anio, mes)
+    } catch (e) {
+      setError('Error al descargar Excel: ' + (e instanceof Error ? e.message : 'Error desconocido'))
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -832,7 +1175,10 @@ function ReporteScreen() {
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">Mes</label>
             <select value={mes} onChange={e => setMes(Number(e.target.value))}
               className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 focus:border-primary-400 focus:outline-none">
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+              {[
+                'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+              ].map((nombre, i) => <option key={i + 1} value={i + 1}>{nombre}</option>)}
             </select>
           </div>
         </div>
@@ -846,7 +1192,7 @@ function ReporteScreen() {
 
       {resumen && (
         <section className="rounded-xl border border-navy-100 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-sm font-bold text-navy-500">Resumen {resumen.mes}/{resumen.anio}</h3>
+          <h3 className="mb-4 text-sm font-bold text-navy-500">Resumen {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][resumen.mes - 1]} {resumen.anio}</h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Total ordenes" value={String(resumen.total_ordenes)} />
             <StatCard label="Total items" value={String(resumen.total_cantidad)} />
@@ -879,7 +1225,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 // Componentes UI
 // ============================================================
 function Input({
-  label, value, onChange, placeholder, type, multiline,
+  label, value, onChange, placeholder, type, multiline, hint, inputMode, pattern,
 }: {
   label: string
   value: string
@@ -887,16 +1233,35 @@ function Input({
   placeholder?: string
   type?: string
   multiline?: boolean
+  hint?: string
+  inputMode?: 'numeric' | 'tel' | 'decimal' | 'text' | 'none' | 'search' | 'email' | 'url'
+  pattern?: string
 }) {
+  const isHintOk = hint && hint.startsWith('✓')
   return (
     <div className="mb-3">
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-navy-300">{label}</label>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="block text-xs font-semibold uppercase tracking-wide text-navy-300">{label}</label>
+        {hint && (
+          <span className={`text-[10px] font-bold ${isHintOk ? 'text-green-600' : 'text-navy-300'}`}>{hint}</span>
+        )}
+      </div>
       {multiline ? (
         <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
           className="min-h-[70px] w-full resize-y rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200" />
       ) : (
-        <input type={type || 'text'} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-          className="w-full rounded-lg border border-navy-100 bg-white px-3 py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200" />
+        <input
+          type={type || 'text'}
+          inputMode={inputMode}
+          pattern={pattern}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full rounded-lg border bg-white px-3 py-2.5 text-sm text-navy-500 placeholder:text-navy-200 focus:outline-none focus:ring-2 transition ${
+            isHintOk
+              ? 'border-green-300 focus:border-green-400 focus:ring-green-100'
+              : 'border-navy-100 focus:border-primary-400 focus:ring-primary-200'
+          }`} />
       )}
     </div>
   )
@@ -921,9 +1286,10 @@ function EmptyState({ text }: { text: string }) {
 
 function ErrorBox({ message, onClose }: { message: string; onClose: () => void }) {
   return (
-    <div className="animate-fade-in flex items-start justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-      <p className="text-sm text-red-700">{message}</p>
-      <button onClick={onClose} className="ml-2 text-red-400 hover:text-red-600">✕</button>
+    <div className="animate-fade-in flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 shadow-sm">
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[10px] font-extrabold text-white">!</span>
+      <p className="flex-1 text-sm font-medium text-red-700">{message}</p>
+      <button onClick={onClose} className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-600" title="Cerrar">×</button>
     </div>
   )
 }

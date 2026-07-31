@@ -6,13 +6,43 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splashBackgroundColor": "#1B263B",
+    "splashBackgroundColor": "#1a3a5e",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a3a5e"
+    },
+    "plugins": [
+      [
+        "expo-screen-orientation",
+        {
+          "orientationLock": "PORTRAIT_UP"
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.renacer.app"
+      "bundleIdentifier": "com.renacer.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Necesitamos conectar a tu base de datos"
+      }
     },
     "android": {
-      "package": "com.renacer.app"
+      "package": "com.renacer.app",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffd700"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {

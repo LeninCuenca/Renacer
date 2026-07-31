@@ -4,6 +4,7 @@ export interface Cliente {
   cedula: string
   telefono?: string | null
   direccion?: string | null
+  activo?: boolean
   created_at?: string
 }
 
@@ -65,10 +66,11 @@ export const DIRECCIONES: string[] = [
 ]
 
 export const MEDIDAS_LLANTAS: string[] = [
-  '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22',
-  'R13', 'R14', 'R15', 'R16', 'R17', 'R18', 'R19', 'R20',
-  '175/70R13', '175/70R14', '185/65R14', '185/65R15', '195/65R15', '205/55R16', '205/60R16', '215/60R16', '225/45R17', '225/55R17',
-  '265/70R16', '265/65R17', '275/55R20', '31x10.50R15', '33x12.50R15',
+  '295/80R22.5',
+  '315/80R22.5',
+  '12R22.5',
+  '12.00R24',
+  'Otros',
 ]
 
 /** Feriados nacionales del Ecuador (no laborables) */

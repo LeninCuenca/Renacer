@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/mockApi.ts","./src/types.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/mockapi.ts","./src/stylesxlsx.ts","./src/supabaseapi.ts","./src/supabaseclient.ts","./src/types.ts","./src/usesupabase.ts","./src/vite-env.d.ts"],"version":"5.9.3"}

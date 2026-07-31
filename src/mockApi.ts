@@ -4,6 +4,9 @@
 
 import type { Cliente, Orden, Item, EstadoOrden, TipoPago, ResumenReporte } from './types'
 import { ESTADOS, calcularFechaVencimiento, diasDeCredito } from './types'
+import { Capacitor } from '@capacitor/core'
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 
 // ============================================================
 // Estado en memoria
@@ -378,13 +381,44 @@ export const mockApi = {
 <head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Reporte</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>
 <body><table border="1">${body}</table></body></html>`
 
-    const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `reporte_renacer_${anio}_${String(mes).padStart(2, '0')}.xls`
-    a.click()
-    URL.revokeObjectURL(url)
+    const fileName = `reporte_renacer_${anio}_${String(mes).padStart(2, '0')}.xls`
+
+    if (Capacitor.isNativePlatform()) {
+      const base64Data = window.btoa(unescape(encodeURIComponent('\ufeff' + html)));
+      const chunkSize = 32768; // 32KB
+      let savedFile: any = null;
+
+      for (let i = 0; i < base64Data.length; i += chunkSize) {
+        const chunk = base64Data.substring(i, i + chunkSize);
+        if (i === 0) {
+          savedFile = await Filesystem.writeFile({
+            path: fileName,
+            data: chunk,
+            directory: Directory.Cache
+          });
+        } else {
+          await Filesystem.appendFile({
+            path: fileName,
+            data: chunk,
+            directory: Directory.Cache
+          });
+        }
+      }
+
+      await Share.share({
+        title: 'Reporte Mensual Renacer',
+        url: savedFile.uri,
+        dialogTitle: 'Compartir o guardar Excel'
+      });
+    } else {
+      const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      a.click()
+      URL.revokeObjectURL(url)
+    }
   },
 
   // --- Alertas de credito por vencer ---
