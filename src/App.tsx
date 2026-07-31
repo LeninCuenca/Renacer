@@ -1149,11 +1149,17 @@ function ReporteScreen() {
 
   useEffect(() => { cargarResumen() }, [])
 
+  const [descargando, setDescargando] = useState(false)
+
   const descargarExcel = async () => {
+    if (descargando) return
+    setDescargando(true); setError(null)
     try {
       await supabaseApi.exportarExcelMensual(anio, mes)
     } catch (e) {
       setError('Error al descargar Excel: ' + (e instanceof Error ? e.message : 'Error desconocido'))
+    } finally {
+      setDescargando(false)
     }
   }
 
@@ -1204,9 +1210,9 @@ function ReporteScreen() {
         </section>
       )}
 
-      <button onClick={descargarExcel}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-400 px-4 py-3.5 text-sm font-bold text-navy-500 shadow-sm transition hover:bg-primary-300 active:scale-[0.99]">
-        <DownloadIcon /> Descargar Excel por cliente
+      <button onClick={descargarExcel} disabled={descargando}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-400 px-4 py-3.5 text-sm font-bold text-navy-500 shadow-sm transition hover:bg-primary-300 active:scale-[0.99] disabled:opacity-60">
+        <DownloadIcon /> {descargando ? 'Generando Excel...' : 'Descargar Excel por cliente'}
       </button>
     </div>
   )

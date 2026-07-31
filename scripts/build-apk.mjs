@@ -13,7 +13,8 @@ if (!existsSync('android')) {
 
 run('npx cap sync android')
 
-run('cd android && .\\gradlew.bat assembleDebug')
+const gradlew = process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew'
+run(`cd android && ${gradlew} assembleDebug`)
 
 console.log('\nAPK generado en: android/app/build/outputs/apk/debug/app-debug.apk')
 console.log('Si quieres abrir Android Studio: npm run cap:open')

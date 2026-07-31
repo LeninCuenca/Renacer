@@ -57,6 +57,17 @@ function traducirError(error: any): string {
   return 'Ocurrió un error inesperado. Intente de nuevo.'
 }
 
+/** Convierte el buffer del Excel a base64, que es lo que espera Filesystem */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const chunk = 8192 // evita superar el limite de argumentos de fromCharCode
+  let binario = ''
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binario += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binario)
+}
+
 /** Recalcula montos excluyendo items rechazados */
 function recalcular(orden: Orden): Orden {
   const itemsValidos = orden.items.filter(it => !it.rechazo)
@@ -664,13 +675,20 @@ export const supabaseApi = {
 
   async exportarExcelMensual(anio: number, mes: number): Promise<void> {
     try {
+      // El mes siguiente puede caer en el año siguiente (diciembre -> enero)
+      const anioSiguiente = mes === 12 ? anio + 1 : anio
+      const mesSiguiente = mes === 12 ? 1 : mes + 1
+
       const { data: ordenes, error } = await supabase
         .from('ordenes')
         .select('*')
         .gte('created_at', `${anio}-${String(mes).padStart(2, '0')}-01`)
-        .lt('created_at', `${anio}-${String(mes + 1).padStart(2, '0')}-01`)
+        .lt('created_at', `${anioSiguiente}-${String(mesSiguiente).padStart(2, '0')}-01`)
 
       if (error) throw error
+      if (!ordenes || ordenes.length === 0) {
+        throw new Error('No hay ordenes registradas en el periodo seleccionado.')
+      }
 
       // Agrupar órdenes por cliente
       interface OrdenyCliente {
@@ -681,18 +699,25 @@ export const supabaseApi = {
       
       const ordenesPorCliente: Map<string, OrdenyCliente[]> = new Map()
 
-      for (const orden of ordenes || []) {
-        const { data: items } = await supabase
-          .from('items')
-          .select('*')
-          .eq('orden_id', orden.id)
+      // Se traen items y clientes en dos consultas, no una por orden:
+      // en movil con red lenta el bucle anterior tardaba demasiado.
+      const ordenIds = ordenes.map(o => o.id)
+      const clienteIds = [...new Set(ordenes.map(o => o.cliente_id).filter(Boolean))]
 
-        const { data: clienteData } = await supabase
-          .from('clientes')
-          .select('*')
-          .eq('id', orden.cliente_id)
-          .single()
+      const [{ data: todosItems }, { data: todosClientes }] = await Promise.all([
+        supabase.from('items').select('*').in('orden_id', ordenIds),
+        supabase.from('clientes').select('*').in('id', clienteIds),
+      ])
 
+      const itemsPorOrden = new Map<string, any[]>()
+      for (const it of todosItems || []) {
+        if (!itemsPorOrden.has(it.orden_id)) itemsPorOrden.set(it.orden_id, [])
+        itemsPorOrden.get(it.orden_id)!.push(it)
+      }
+      const clientePorId = new Map((todosClientes || []).map(c => [c.id, c]))
+
+      for (const orden of ordenes) {
+        const clienteData = clientePorId.get(orden.cliente_id) || null
         const clienteKey = clienteData?.id || 'desconocido'
         if (!ordenesPorCliente.has(clienteKey)) {
           ordenesPorCliente.set(clienteKey, [])
@@ -700,7 +725,7 @@ export const supabaseApi = {
         ordenesPorCliente.get(clienteKey)!.push({
           orden,
           cliente: clienteData,
-          items: items || []
+          items: itemsPorOrden.get(orden.id) || []
         })
       }
 
@@ -922,49 +947,29 @@ export const supabaseApi = {
       const fileName = `Reporte_Renacer_${String(mes).padStart(2, '0')}_${anio}.xlsx`
 
       if (Capacitor.isNativePlatform()) {
-        alert("Paso 1: Convirtiendo datos...");
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            if (typeof reader.result === 'string') {
-              const base64 = reader.result.split(',')[1];
-              resolve(base64);
-            } else {
-              reject(new Error('Failed to convert to base64'));
-            }
-          };
-          reader.onerror = reject;
-          const excelBlob = new Blob([buffer]);
-          reader.readAsDataURL(excelBlob);
-        });
+        const base64Data = arrayBufferToBase64(buffer as ArrayBuffer)
 
-        alert("Paso 2: Guardando archivo de forma segura...");
-        const chunkSize = 32768; // 32KB (múltiplo de 4) seguro para IPC de Android
-        let savedFile: any = null;
+        // Una sola escritura: encadenar writeFile + appendFile por trozos
+        // multiplicaba las llamadas al puente nativo sin ninguna ventaja.
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+        })
 
-        for (let i = 0; i < base64Data.length; i += chunkSize) {
-          const chunk = base64Data.substring(i, i + chunkSize);
-          if (i === 0) {
-            savedFile = await Filesystem.writeFile({
-              path: fileName,
-              data: chunk,
-              directory: Directory.Cache
-            });
-          } else {
-            await Filesystem.appendFile({
-              path: fileName,
-              data: chunk,
-              directory: Directory.Cache
-            });
-          }
+        try {
+          // Se usa `files` (no `url`): es la via soportada para compartir
+          // archivos y deja que Android resuelva el permiso via FileProvider.
+          await Share.share({
+            title: 'Reporte Mensual Renacer',
+            files: [savedFile.uri],
+            dialogTitle: 'Compartir o guardar Excel',
+          })
+        } catch (shareError) {
+          // Cerrar el menu de compartir no es un fallo real
+          const msg = shareError instanceof Error ? shareError.message : String(shareError)
+          if (!/cancel/i.test(msg)) throw shareError
         }
-
-        alert("Paso 3: Abriendo menú de compartir...");
-        await Share.share({
-          title: 'Reporte Mensual Renacer',
-          url: savedFile.uri,
-          dialogTitle: 'Compartir o guardar Excel'
-        });
       } else {
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
         const url = window.URL.createObjectURL(blob)
