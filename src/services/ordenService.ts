@@ -2,7 +2,7 @@ import { supabase } from './supabaseClient'
 import type { Orden, Item, EstadoOrden, TipoPago, EstadoEvaluacionLlanta } from '../types'
 import { ESTADOS, diasDeCredito, calcularFechaVencimiento } from '../types'
 import type { AlertaCredito } from '../types'
-import { traducirError, validarTransicion, verificarEntrega, getCacheOrdenes, setCacheOrdenes, CACHE_TTL_MS } from './helpers'
+import { traducirError, validarTransicion, verificarEntrega, getCacheOrdenes, setCacheOrdenes, invalidarCacheOrdenes, CACHE_TTL_MS } from './helpers'
 
 // ============================================================
 // Servicio de Órdenes — CRUD + trazabilidad + pago
@@ -160,17 +160,22 @@ export const ordenService = {
       verificarEntrega(orden)
     }
 
-    const fechaKey = {
-      'Recepcion': 'fecha_rc',
-      'Envio a fabrica': 'fecha_ef',
-      'Retorno de fabrica': 'fecha_rf',
-      'En bodega': 'fecha_bodega',
-      'Entregado al cliente': 'fecha_ec',
-    }[nuevoEstado] as keyof Orden
-
     const updateData: any = {
       estado: nuevoEstado,
-      [fechaKey]: new Date().toISOString(),
+    }
+    
+    if (nuevoEstado !== 'Cancelada') {
+      const fechaKey = {
+        'Recepcion': 'fecha_rc',
+        'Envio a fabrica': 'fecha_ef',
+        'Retorno de fabrica': 'fecha_rf',
+        'En bodega': 'fecha_bodega',
+        'Entregado al cliente': 'fecha_ec',
+      }[nuevoEstado as Exclude<EstadoOrden, 'Cancelada'>] as keyof Orden
+      
+      if (fechaKey) {
+        updateData[fechaKey] = new Date().toISOString()
+      }
     }
 
     if (nuevoEstado === 'Entregado al cliente') {
