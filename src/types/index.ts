@@ -1,3 +1,7 @@
+// ============================================================
+// Types, Interfaces y Constantes del sistema Renacer
+// ============================================================
+
 export interface Cliente {
   id: number
   nombre: string
@@ -6,6 +10,43 @@ export interface Cliente {
   direccion?: string | null
   activo?: boolean
   created_at?: string
+}
+
+export type Rol = 'vendedor' | 'supervisor' | 'jefe' | 'contador' | 'administrador_planta'
+export type EstadoEvaluacionLlanta = 'pendiente' | 'valida' | 'no_valida'
+
+export interface Perfil {
+  id: string
+  nombre: string
+  nombres?: string | null
+  apellidos?: string | null
+  cedula: string
+  correo: string
+  telefono?: string | null
+  rol: Rol
+  activo: boolean
+  created_at?: string
+}
+
+export interface PlanificacionSemanal {
+  id?: number
+  vendedor_id: string
+  semana_inicio: string
+  dia: number
+  ubicacion: string
+  notas: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EdicionPlanificacion {
+  id: number
+  vendedor_id: string
+  editado_por: string
+  semana_inicio: string
+  version: number
+  snapshot: Array<{ dia: number; ubicacion: string; notas: string }>
+  created_at: string
 }
 
 export interface Item {
@@ -20,15 +61,32 @@ export interface Item {
   rechazo: boolean
   observaciones: string
   fecha_ingreso?: string | null
+  evaluacion_estado?: EstadoEvaluacionLlanta | null
+  evaluacion_observaciones?: string | null
+  evaluado_por?: string | null
 }
 
-export type EstadoOrden = 'Recepcion' | 'Envio a fabrica' | 'Retorno de fabrica' | 'En bodega' | 'Entregado al cliente'
+export interface EvaluacionLlanta {
+  id: number
+  item_id: number
+  orden_id: number
+  numero_llanta: number
+  evaluado_por: string
+  estado: EstadoEvaluacionLlanta
+  observaciones: string
+  created_at: string
+  updated_at?: string
+}
+
+export type EstadoOrden = 'Recepcion' | 'Envio a fabrica' | 'Retorno de fabrica' | 'En bodega' | 'Entregado al cliente' | 'Cancelada'
 export type TipoPago = 'Contado' | 'Diferido en efectivo' | 'Credito 30 dias' | 'Credito 60 dias' | 'Credito 90 dias' | 'Cheque' | 'Transferencia'
 
 export interface Orden {
   id: number
   numero: string
   cliente_id: number
+  vendedor_id?: string | null
+  vendedor_nombre?: string | null
   cliente_nombre?: string | null
   estado: EstadoOrden
   fecha_rc?: string | null
@@ -58,6 +116,17 @@ export interface ResumenReporte {
   promedio_rc_ec_dias: number | null
 }
 
+export interface AlertaCredito {
+  orden: Orden
+  diasRestantes: number
+  porVencer: boolean
+  vencido: boolean
+}
+
+// ============================================================
+// Constantes
+// ============================================================
+
 export const ESTADOS: EstadoOrden[] = ['Recepcion', 'Envio a fabrica', 'Retorno de fabrica', 'En bodega', 'Entregado al cliente']
 export const TIPOS_PAGO: TipoPago[] = ['Contado', 'Diferido en efectivo', 'Credito 30 dias', 'Credito 60 dias', 'Credito 90 dias', 'Cheque', 'Transferencia']
 
@@ -73,6 +142,15 @@ export const MEDIDAS_LLANTAS: string[] = [
   'Otros',
 ]
 
+export const MESES: string[] = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
+
+// ============================================================
+// Feriados Ecuador
+// ============================================================
+
 /** Feriados nacionales del Ecuador (no laborables) */
 export const FERIADOS_EC: Record<number, string[]> = {
   2025: [
@@ -80,12 +158,16 @@ export const FERIADOS_EC: Record<number, string[]> = {
     '2025-05-01', '2025-05-02', '2025-05-23', '2025-06-06', '2025-08-10',
     '2025-10-09', '2025-11-03', '2025-11-04', '2025-12-25',
   ],
-    2026: [
+  2026: [
     '2026-01-01', '2026-02-16', '2026-03-02', '2026-04-06', '2026-05-01',
     '2026-05-22', '2026-05-29', '2026-06-05', '2026-08-10', '2026-10-09',
     '2026-11-02', '2026-11-03', '2026-12-25',
   ],
 }
+
+// ============================================================
+// Funciones utilitarias de fecha
+// ============================================================
 
 /** Verifica si una fecha es feriado en Ecuador */
 export function esFeriado(fecha: Date): boolean {
@@ -101,16 +183,10 @@ export function esFinDeSemana(fecha: Date): boolean {
   return dia === 0 || dia === 6
 }
 
-/** Calcula la fecha de vencimiento sumando dias habiles (saltando feriados y fines de semana) */
+/** Calcula la fecha de vencimiento sumando dias corridos */
 export function calcularFechaVencimiento(fechaInicio: Date, diasCredito: number): Date {
   let fecha = new Date(fechaInicio)
-  let diasRestantes = diasCredito
-  while (diasRestantes > 0) {
-    fecha.setDate(fecha.getDate() + 1)
-    if (!esFeriado(fecha) && !esFinDeSemana(fecha)) {
-      diasRestantes--
-    }
-  }
+  fecha.setDate(fecha.getDate() + diasCredito)
   return fecha
 }
 
