@@ -76,16 +76,32 @@ export function diffDias(a?: string | null, b?: string | null): number | null {
   return null
 }
 
-/** Valida la trazabilidad secuencial */
+/** Valida la trazabilidad y transiciones operativas permitidas */
 export function validarTransicion(orden: Orden, nuevoEstado: EstadoOrden): void {
   if (nuevoEstado === 'Cancelada') return // Se puede cancelar en cualquier momento
-  const idxActual = ESTADOS.indexOf(orden.estado)
-  const idxNuevo = ESTADOS.indexOf(nuevoEstado as any)
-  if (idxNuevo <= idxActual) {
-    throw new Error('No se puede retroceder en la trazabilidad. El estado debe avanzar secuencialmente.')
+
+  const transicionesValidas: Record<EstadoOrden, EstadoOrden[]> = {
+    'Recepcion': ['Envio a fabrica'],
+    'Envio a fabrica': ['Retorno de fabrica'],
+    'Retorno de fabrica': ['En bodega', 'Entregado al cliente'],
+    'En bodega': ['Entregado al cliente'],
+    'Entregado al cliente': [],
+    'Cancelada': [],
   }
-  if (idxNuevo !== idxActual + 1) {
-    throw new Error(`Debe avanzar al estado siguiente: "${ESTADOS[idxActual + 1]}". No puede saltar pasos.`)
+
+  const permitidos = transicionesValidas[orden.estado] || []
+  if (!permitidos.includes(nuevoEstado)) {
+    if (permitidos.length === 0) {
+      throw new Error(`La orden ya se encuentra en su estado final (${orden.estado}).`)
+    }
+    throw new Error(`Transición no válida. Opciones permitidas: ${permitidos.map(p => `"${p}"`).join(' o ')}.`)
+  }
+
+  // Regla contable: La contadora debe generar la factura antes de pasar a Bodega o Entregar al cliente
+  if (orden.estado === 'Retorno de fabrica' && (nuevoEstado === 'En bodega' || nuevoEstado === 'Entregado al cliente')) {
+    if (!orden.factura_emitida) {
+      throw new Error('No se puede avanzar: la contadora primero debe generar la factura.')
+    }
   }
 }
 

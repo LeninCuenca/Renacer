@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { ordenService } from '../services/ordenService'
 import type { Orden } from '../types'
 import { formatCurrency, formatFecha } from '../services/helpers'
+import OrdenDetalleModal from './OrdenDetalleModal'
 
 export default function CarteraScreen() {
   const [ordenes, setOrdenes] = useState<Orden[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tabCartera, setTabCartera] = useState<'facturar' | 'cobrar'>('facturar')
+  const [selected, setSelected] = useState<Orden | null>(null)
 
   useEffect(() => {
     ordenService.getOrdenes()
@@ -19,8 +21,8 @@ export default function CarteraScreen() {
   if (loading) return <p className="py-8 text-center text-sm text-navy-200">Cargando módulo de cartera...</p>
   if (error) return <p className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{error}</p>
 
-  // Órdenes en retorno de fábrica (para facturar)
-  const paraFacturar = ordenes.filter(o => o.estado === 'Retorno de fabrica')
+  // Órdenes en retorno de fábrica pendientes de facturar
+  const paraFacturar = ordenes.filter(o => o.estado === 'Retorno de fabrica' && !o.factura_emitida)
   // Órdenes con montos pendientes de cobro (Cartera activa)
   const paraCobrar = ordenes.filter(o => o.monto_pendiente > 0)
   
@@ -73,7 +75,7 @@ export default function CarteraScreen() {
             <p className="text-sm text-navy-200 py-4">No hay órdenes pendientes de facturación (en retorno de fábrica).</p>
           ) : (
             paraFacturar.map(orden => (
-              <div key={orden.id} className="rounded-xl border border-orange-100 bg-white p-4 shadow-sm transition-all hover:shadow-md">
+              <button key={orden.id} onClick={() => setSelected(orden)} className="w-full text-left rounded-xl border border-orange-100 bg-white p-4 shadow-sm transition-all hover:border-orange-300 hover:shadow-md">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-navy-50 pb-3">
                   <div>
                     <h3 className="font-bold text-navy-500">{orden.numero}</h3>
@@ -128,11 +130,21 @@ export default function CarteraScreen() {
                   </div>
                 </div>
                 
-                <div className="flex justify-between items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-sm font-semibold text-orange-800">Total a Facturar:</span>
-                  <span className="text-lg font-bold text-orange-600">{formatCurrency(orden.monto_total)}</span>
+                <div className="flex flex-col gap-1 rounded-lg bg-orange-50 p-3">
+                  <div className="flex justify-between text-xs text-orange-800">
+                    <span>Subtotal:</span>
+                    <span>{formatCurrency(orden.monto_total / 1.15)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-orange-800">
+                    <span>IVA (15%):</span>
+                    <span>{formatCurrency(orden.monto_total - (orden.monto_total / 1.15))}</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1 pt-1 border-t border-orange-200">
+                    <span className="text-sm font-semibold text-orange-800">Total a Facturar:</span>
+                    <span className="text-lg font-bold text-orange-600">{formatCurrency(orden.monto_total)}</span>
+                  </div>
                 </div>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -179,6 +191,18 @@ export default function CarteraScreen() {
             </div>
           )}
         </div>
+      )}
+
+      {selected && (
+        <OrdenDetalleModal
+          orden={selected}
+          rol="contador"
+          onOrdenActualizada={(actualizada) => {
+            setOrdenes(prev => prev.map(o => o.id === actualizada.id ? actualizada : o))
+            setSelected(actualizada)
+          }}
+          onClose={() => setSelected(null)}
+        />
       )}
     </div>
   )

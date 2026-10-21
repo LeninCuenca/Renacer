@@ -101,6 +101,9 @@ export interface Orden {
   monto_pendiente: number
   pagado_completo: boolean
   activo_vigente: boolean
+  factura_emitida?: boolean
+  fecha_factura?: string | null
+  numero_factura?: string | null
   observaciones: string
   created_at?: string | null
   items: Item[]

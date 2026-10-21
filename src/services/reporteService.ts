@@ -229,4 +229,409 @@ export const reporteService = {
       throw new Error(`Error al exportar Excel: ${e instanceof Error ? e.message : 'Error desconocido'}`)
     }
   },
+
+  async exportarNotaEntrega(orden: any): Promise<void> {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('Nota de Entrega')
+
+      worksheet.columns = [
+        { key: 'ot',       width: 12 },
+        { key: 'cant',     width: 10 },
+        { key: 'ct',       width: 12 },
+        { key: 'marca',    width: 20 },
+        { key: 'medida',   width: 20 },
+        { key: 'serie',    width: 15 },
+        { key: 'codigo',   width: 15 },
+        { key: 'precio',   width: 20 },
+      ]
+
+      // Logo/Header space
+      worksheet.mergeCells('A1:B3')
+      worksheet.getCell('A1').value = 'RENACER'
+      worksheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FF1a3a5e' } }
+      worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' }
+
+      worksheet.mergeCells('F1:H3')
+      const titleCell = worksheet.getCell('F1')
+      titleCell.value = 'NOTA DE ENTREGA'
+      titleCell.font = { bold: true, size: 22, color: { argb: 'FF1a3a5e' } }
+      titleCell.alignment = { horizontal: 'right', vertical: 'middle' }
+
+      // Subheaders
+      worksheet.getCell('A5').value = 'CLIENTE'
+      worksheet.getCell('A5').font = { bold: true }
+      worksheet.getCell('B5').value = orden.cliente_nombre?.toUpperCase() || ''
+      worksheet.getCell('B5').font = { bold: true, size: 12 }
+      
+      worksheet.getCell('A6').value = 'FECHA ENTREGA'
+      worksheet.getCell('A6').font = { bold: true }
+      worksheet.getCell('B6').value = new Date().toLocaleDateString('es-EC', { day: 'numeric', month: 'long', year: 'numeric' })
+
+      const numeroNota = `001-001-${String(orden.id).padStart(6, '0')}`
+      worksheet.mergeCells('F5:H5')
+      worksheet.getCell('F5').value = numeroNota
+      worksheet.getCell('F5').font = { bold: true, size: 16 }
+      worksheet.getCell('F5').alignment = { horizontal: 'center' }
+
+      worksheet.mergeCells('F6:H6')
+      worksheet.getCell('F6').value = `CREADO: ${new Date(orden.created_at || '').toLocaleDateString('es-EC')}`
+      worksheet.getCell('F6').alignment = { horizontal: 'center' }
+      worksheet.getCell('F6').font = { size: 10 }
+
+      // Empty row
+      worksheet.addRow([])
+
+      // Table Header
+      const headerRow = worksheet.addRow(['OT', 'CANT', 'CT', 'MARCA', 'MEDIDA', 'SERIE', 'CODIGO', 'PRECIO INC IVA'])
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      headerRow.height = 25
+      const border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }
+      headerRow.eachCell(c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1a3a5e' } }
+        c.border = border as any
+        c.alignment = { horizontal: 'center', vertical: 'middle' }
+      })
+
+      // Items
+      let totalCant = 0
+      let totalPrecio = 0
+      const itemsValidos = orden.items.filter((i: any) => !i.rechazo)
+      itemsValidos.forEach((item: any) => {
+        const row = worksheet.addRow([
+          orden.numero,
+          item.cantidad,
+          item.id || '',
+          item.marca || '',
+          item.media || '',
+          item.n_serie || '',
+          item.diseno || '',
+          item.valor_unitario
+        ])
+        row.eachCell((c, colNum) => {
+          c.border = border as any
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
+        })
+        row.getCell(8).numFmt = '0.00'
+        totalCant += item.cantidad
+        totalPrecio += item.cantidad * item.valor_unitario
+      })
+
+      // Envío text
+      const sendRow = worksheet.addRow([])
+      worksheet.mergeCells(`A${sendRow.number}:H${sendRow.number}`)
+      const sendCell = worksheet.getCell(`A${sendRow.number}`)
+      
+      const { data: clienteRes } = await supabase.from('clientes').select('direccion').eq('id', orden.cliente_id).single()
+      const direccion = clienteRes?.direccion || 'BODEGA'
+      sendCell.value = `ENVIO A ${direccion.toUpperCase()}`
+      sendCell.alignment = { horizontal: 'center', vertical: 'middle' }
+      sendCell.font = { bold: true }
+      sendRow.height = 25
+
+      // Total row
+      const totRow = worksheet.addRow([])
+      worksheet.mergeCells(`A${totRow.number}:B${totRow.number}`)
+      totRow.getCell(1).value = 'TOTAL ITEMS DESPACHADOS'
+      totRow.getCell(1).font = { bold: true }
+      totRow.getCell(3).value = totalCant
+      totRow.getCell(3).alignment = { horizontal: 'center' }
+      totRow.getCell(3).font = { bold: true, size: 14 }
+      
+      worksheet.mergeCells(`E${totRow.number}:G${totRow.number}`)
+      totRow.getCell(5).value = 'TOTAL'
+      totRow.getCell(5).font = { bold: true, size: 14 }
+      totRow.getCell(5).alignment = { horizontal: 'right', vertical: 'middle' }
+      totRow.getCell(8).value = totalPrecio
+      totRow.getCell(8).numFmt = '0.00'
+      totRow.getCell(8).font = { bold: true, size: 14 }
+      totRow.getCell(8).border = border as any
+      totRow.height = 30
+
+      // Signatures
+      worksheet.addRow([])
+      worksheet.addRow([])
+      worksheet.addRow([])
+      const sigRow = worksheet.addRow(['', 'ENTREGADO', '', 'BODEGA', '', 'RECIBI CONFORME', ''])
+      sigRow.eachCell((c, colNumber) => {
+        if (c.value) {
+          c.border = { top: { style: 'thin' } } as any
+          c.alignment = { horizontal: 'center' }
+          c.font = { bold: true }
+        }
+      })
+
+      // Generate file
+      const buffer   = await workbook.xlsx.writeBuffer()
+      const fileName = `Nota_Entrega_${orden.numero}.xlsx`
+
+      if (Capacitor.isNativePlatform()) {
+        const base64Data = arrayBufferToBase64(buffer as ArrayBuffer)
+        const savedFile  = await Filesystem.writeFile({
+          path: fileName, data: base64Data, directory: Directory.Cache,
+        })
+        try {
+          await Share.share({ title: `Nota de Entrega ${orden.numero}`, files: [savedFile.uri] })
+        } catch (shareError) {
+          const msg = shareError instanceof Error ? shareError.message : String(shareError)
+          if (!/cancel/i.test(msg)) throw shareError
+        }
+      } else {
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        const url  = window.URL.createObjectURL(blob)
+        const a    = document.createElement('a')
+        a.href = url; a.download = fileName
+        document.body.appendChild(a); a.click()
+        setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url) }, 100)
+      }
+    } catch (e) {
+      throw new Error(`Error al exportar nota de entrega: ${e instanceof Error ? e.message : 'Error desconocido'}`)
+    }
+  },
+
+  async getReportePlantaData(): Promise<any[]> {
+    const { data: evaluaciones, error } = await supabase
+      .from('evaluaciones_llantas')
+      .select('*')
+      .neq('estado', 'pendiente')
+      .order('updated_at', { ascending: false })
+      .limit(3000)
+
+    if (error) throw error
+    if (!evaluaciones || evaluaciones.length === 0) return []
+
+    const itemIds = [...new Set(evaluaciones.map(e => e.item_id))]
+    const ordenIds = [...new Set(evaluaciones.map(e => e.orden_id))]
+
+    const { data: items } = await supabase.from('items').select('*').in('id', itemIds)
+    const { data: ordenes } = await supabase.from('ordenes').select('id, numero, cliente_id').in('id', ordenIds)
+    
+    const clienteIds = [...new Set((ordenes || []).map(o => o.cliente_id).filter(Boolean))]
+    const { data: clientes } = await supabase.from('clientes').select('id, nombre').in('id', clienteIds)
+
+    const itemsMap = new Map((items || []).map(i => [i.id, i]))
+    const ordenesMap = new Map((ordenes || []).map(o => [o.id, o]))
+    const clientesMap = new Map((clientes || []).map(c => [c.id, c]))
+
+    const result = []
+
+    for (const ev of evaluaciones) {
+      if (ev.estado === 'pendiente') continue
+
+      const it = itemsMap.get(ev.item_id)
+      const ord = ordenesMap.get(ev.orden_id)
+      const cli = ord ? clientesMap.get(ord.cliente_id) : null
+
+      const dateObj = new Date(ev.updated_at || ev.created_at)
+      const fechaStr = `${dateObj.getDate().toString().padStart(2, '0')}-${dateObj.toLocaleString('es-EC', { month: 'short' })}`
+
+      const estadoTxt = ev.estado === 'valida' ? 'TERMINADA' : ev.estado === 'no_valida' ? 'RECHAZO' : ev.estado
+
+      result.push({
+        id: ev.id,
+        fecha: fechaStr,
+        orden: ord?.numero || '',
+        cliente: cli?.nombre || 'Sin Cliente',
+        marca: it?.marca || '',
+        medida: it?.media || '',
+        serie: it?.n_serie || '',
+        numero_llanta: ev.numero_llanta,
+        observaciones: ev.observaciones || it?.diseno || '',
+        estado: estadoTxt
+      })
+    }
+
+    // Ordenar primero por Orden (descendente) y luego por Numero de Llanta (ascendente)
+    result.sort((a, b) => {
+      if (a.orden > b.orden) return -1
+      if (a.orden < b.orden) return 1
+      return a.numero_llanta - b.numero_llanta
+    })
+
+    return result
+  },
+
+  async exportarReportePlanta(rango: 'dia' | 'semana' | 'mes'): Promise<void> {
+    try {
+      const ahora = new Date()
+      let fechaInicio = new Date()
+      
+      if (rango === 'dia') {
+        fechaInicio.setHours(0, 0, 0, 0)
+      } else if (rango === 'semana') {
+        const day = ahora.getDay()
+        const diff = ahora.getDate() - day + (day === 0 ? -6 : 1) // Lunes
+        fechaInicio.setDate(diff)
+        fechaInicio.setHours(0, 0, 0, 0)
+      } else if (rango === 'mes') {
+        fechaInicio.setDate(1)
+        fechaInicio.setHours(0, 0, 0, 0)
+      }
+
+      const { data: evaluaciones, error } = await supabase
+        .from('evaluaciones_llantas')
+        .select('*')
+        .gte('updated_at', fechaInicio.toISOString())
+        .order('updated_at', { ascending: true })
+
+      if (error) throw error
+      if (!evaluaciones || evaluaciones.length === 0) {
+        throw new Error(`No hay llantas evaluadas en este periodo (${rango}).`)
+      }
+
+      const itemIds = [...new Set(evaluaciones.map(e => e.item_id))]
+      const ordenIds = [...new Set(evaluaciones.map(e => e.orden_id))]
+
+      const { data: items } = await supabase.from('items').select('*').in('id', itemIds)
+      const { data: ordenes } = await supabase.from('ordenes').select('id, numero, cliente_id').in('id', ordenIds)
+      
+      const clienteIds = [...new Set((ordenes || []).map(o => o.cliente_id).filter(Boolean))]
+      const { data: clientes } = await supabase.from('clientes').select('id, nombre').in('id', clienteIds)
+
+      const itemsMap = new Map((items || []).map(i => [i.id, i]))
+      const ordenesMap = new Map((ordenes || []).map(o => [o.id, o]))
+      const clientesMap = new Map((clientes || []).map(c => [c.id, c]))
+
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('Reporte Planta')
+
+      worksheet.columns = [
+        { header: 'Fecha', key: 'fecha', width: 15 },
+        { header: 'Orden', key: 'orden', width: 12 },
+        { header: 'Cliente', key: 'cliente', width: 30 },
+        { header: 'Marca', key: 'marca', width: 20 },
+        { header: 'Medida', key: 'medida', width: 15 },
+        { header: 'Serie', key: 'serie', width: 15 },
+        { header: 'Item N°', key: 'numero_llanta', width: 10 },
+        { header: 'Trabajo / Obs.', key: 'observaciones', width: 30 },
+        { header: 'Estado', key: 'estado', width: 15 }
+      ]
+
+      // Estilo a la cabecera
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }
+
+      for (const ev of evaluaciones) {
+        // Solo exportamos las ya evaluadas
+        if (ev.estado === 'pendiente') continue;
+
+        const it = itemsMap.get(ev.item_id)
+        const ord = ordenesMap.get(ev.orden_id)
+        const cli = ord ? clientesMap.get(ord.cliente_id) : null
+
+        const dateObj = new Date(ev.updated_at || ev.created_at)
+        const fechaStr = `${dateObj.getDate().toString().padStart(2, '0')}-${dateObj.toLocaleString('es-EC', { month: 'short' })}`
+
+        const estadoTxt = ev.estado === 'valida' ? 'TERMINADA' : ev.estado === 'no_valida' ? 'RECHAZO' : ev.estado
+
+        const row = worksheet.addRow({
+          fecha: fechaStr,
+          orden: ord?.numero || '',
+          cliente: cli?.nombre || 'Sin Cliente',
+          marca: it?.marca || '',
+          medida: it?.media || '',
+          serie: it?.n_serie || '',
+          numero_llanta: ev.numero_llanta,
+          observaciones: ev.observaciones || it?.diseno || '',
+          estado: estadoTxt
+        })
+
+        // Color al estado
+        const cellEstado = row.getCell('estado')
+        if (ev.estado === 'valida') {
+          cellEstado.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } } // verde
+          cellEstado.font = { color: { argb: 'FF065F46' }, bold: true }
+        } else if (ev.estado === 'no_valida') {
+          cellEstado.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } } // rojo
+          cellEstado.font = { color: { argb: 'FF991B1B' }, bold: true }
+        }
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const fileName = `Reporte_Planta_${rango}_${new Date().getTime()}.xlsx`
+
+      if (Capacitor.isNativePlatform()) {
+        const base64 = arrayBufferToBase64(buffer)
+        const savedFile = await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache })
+        await Share.share({ title: fileName, url: savedFile.uri })
+      } else {
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        const url  = window.URL.createObjectURL(blob)
+        const a    = document.createElement('a')
+        a.href = url; a.download = fileName
+        document.body.appendChild(a); a.click()
+        setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url) }, 100)
+      }
+    } catch (e) {
+      throw new Error(`Error al exportar reporte de planta: ${e instanceof Error ? e.message : 'Error desconocido'}`)
+    }
+  },
+
+  async exportarDataPlanta(rows: any[], fileNamePrefix: string): Promise<void> {
+    try {
+      if (!rows || rows.length === 0) {
+        throw new Error('No hay datos para exportar.')
+      }
+
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('Reporte Planta')
+
+      worksheet.columns = [
+        { header: 'Fecha', key: 'fecha', width: 15 },
+        { header: 'Orden', key: 'orden', width: 12 },
+        { header: 'Cliente', key: 'cliente', width: 30 },
+        { header: 'Marca', key: 'marca', width: 20 },
+        { header: 'Medida', key: 'medida', width: 15 },
+        { header: 'Serie', key: 'serie', width: 15 },
+        { header: 'Item N°', key: 'numero_llanta', width: 10 },
+        { header: 'Trabajo / Obs.', key: 'observaciones', width: 30 },
+        { header: 'Estado', key: 'estado', width: 15 }
+      ]
+
+      // Estilo a la cabecera
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }
+
+      for (const rowData of rows) {
+        const row = worksheet.addRow({
+          fecha: rowData.fecha,
+          orden: rowData.orden,
+          cliente: rowData.cliente,
+          marca: rowData.marca,
+          medida: rowData.medida,
+          serie: rowData.serie,
+          numero_llanta: rowData.numero_llanta,
+          observaciones: rowData.observaciones,
+          estado: rowData.estado
+        })
+
+        const cellEstado = row.getCell('estado')
+        if (rowData.estado === 'TERMINADA') {
+          cellEstado.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }
+          cellEstado.font = { color: { argb: 'FF065F46' }, bold: true }
+        } else if (rowData.estado === 'RECHAZO') {
+          cellEstado.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }
+          cellEstado.font = { color: { argb: 'FF991B1B' }, bold: true }
+        }
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const fileName = `${fileNamePrefix}_${new Date().getTime()}.xlsx`
+
+      if (Capacitor.isNativePlatform()) {
+        const base64 = arrayBufferToBase64(buffer)
+        const savedFile = await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache })
+        await Share.share({ title: fileName, url: savedFile.uri })
+      } else {
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        const url  = window.URL.createObjectURL(blob)
+        const a    = document.createElement('a')
+        a.href = url; a.download = fileName
+        document.body.appendChild(a); a.click()
+        setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url) }, 100)
+      }
+    } catch (e) {
+      throw new Error(`Error al exportar reporte de planta: ${e instanceof Error ? e.message : 'Error desconocido'}`)
+    }
+  }
 }

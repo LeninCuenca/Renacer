@@ -1,6 +1,6 @@
 import type { Rol } from '../types'
 
-export type AppTab = 'dashboard' | 'ordenes' | 'nueva' | 'clientes' | 'reporte' | 'usuarios' | 'vendedores' | 'planificacion' | 'planificaciones' | 'planta' | 'cartera'
+export type AppTab = 'dashboard' | 'ordenes' | 'nueva' | 'clientes' | 'reporte' | 'usuarios' | 'vendedores' | 'planificacion' | 'planificaciones' | 'planta' | 'cartera' | 'produccion'
 
 export interface RoleNavigation {
   label: string
@@ -19,16 +19,17 @@ export const TAB_LABELS: Record<AppTab, string> = {
   planificaciones: 'Planificaciones',
   planta: 'Planta',
   cartera: 'Cartera',
+  produccion: 'Producción',
 }
 
 export const ROLE_NAVIGATION: Record<Rol, RoleNavigation> = {
   vendedor: {
     label: 'Vendedor',
-    tabs: ['ordenes', 'nueva', 'planificacion', 'clientes', 'reporte'],
+    tabs: ['ordenes', 'nueva', 'planificacion', 'clientes', 'produccion', 'reporte'],
   },
   supervisor: {
     label: 'Supervisor',
-    tabs: ['dashboard', 'ordenes', 'planificaciones', 'reporte'],
+    tabs: ['dashboard', 'ordenes', 'planificaciones', 'produccion', 'reporte'],
   },
   jefe: {
     label: 'Jefe',
@@ -36,11 +37,11 @@ export const ROLE_NAVIGATION: Record<Rol, RoleNavigation> = {
   },
   contador: {
     label: 'Contador',
-    tabs: ['cartera', 'ordenes'],
+    tabs: ['cartera', 'ordenes', 'produccion'],
   },
   administrador_planta: {
     label: 'Administrador de planta',
-    tabs: ['planta'],
+    tabs: ['planta', 'produccion'],
   },
 }
 

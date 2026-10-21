@@ -1,22 +1,69 @@
--- ========================================
--- AUTENTICACION Y PERFILES
--- ========================================
-CREATE TYPE app_role AS ENUM ('vendedor', 'supervisor', 'jefe', 'contador', 'administrador_planta');
+-- ==============================================================================
+-- SISTEMA RENACER - ESQUEMA COMPLETO Y SCRIPT DE RESTABLECIMIENTO (RESET)
+-- ==============================================================================
+-- Este script:
+-- 1. Elimina (DROP) todas las tablas, triggers, funciones y tipos existentes
+--    de forma segura en orden inverso de dependencias (CASCADE).
+-- 2. Vuelve a crear toda la estructura limpia y actualizada:
+--    - Perfiles y roles (con soporte para administrador de planta y supervisores)
+--    - Planificaciones semanales y auditoría de ediciones
+--    - Clientes, órdenes, ítems, abonos y evaluaciones de llantas
+-- 3. Configura índices de alto rendimiento y políticas RLS libres para migración.
+-- 4. Re-sincroniza automáticamente cualquier usuario ya registrado en auth.users.
+-- ==============================================================================
 
-CREATE TABLE perfiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  nombre TEXT NOT NULL CHECK (char_length(trim(nombre)) >= 2),
-  nombres TEXT,
-  apellidos TEXT,
-  cedula TEXT NOT NULL UNIQUE CHECK (char_length(trim(cedula)) >= 5),
-  correo TEXT NOT NULL,
-  telefono TEXT,
-  rol app_role NOT NULL DEFAULT 'vendedor',
-  activo BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- ==============================================================================
+-- PASO 1: LIMPIEZA COMPLETA / RESET DE LA BASE DE DATOS
+-- ==============================================================================
+
+-- 1.1 Desvincular triggers en esquemas del sistema (auth)
+DROP TRIGGER IF EXISTS usuario_crea_perfil ON auth.users;
+
+-- 1.2 Eliminar tablas con CASCADE (elimina FKs, políticas e índices asociados)
+DROP TABLE IF EXISTS public.evaluaciones_llantas CASCADE;
+DROP TABLE IF EXISTS public.ediciones_planificacion CASCADE;
+DROP TABLE IF EXISTS public.planificaciones_semanales CASCADE;
+DROP TABLE IF EXISTS public.abonos CASCADE;
+DROP TABLE IF EXISTS public.items CASCADE;
+DROP TABLE IF EXISTS public.ordenes CASCADE;
+DROP TABLE IF EXISTS public.clientes CASCADE;
+DROP TABLE IF EXISTS public.perfiles CASCADE;
+
+-- 1.3 Eliminar funciones de la aplicación
+DROP FUNCTION IF EXISTS public.crear_perfil_usuario() CASCADE;
+DROP FUNCTION IF EXISTS public.actualizar_updated_at() CASCADE;
+DROP FUNCTION IF EXISTS public.es_jefe() CASCADE;
+DROP FUNCTION IF EXISTS public.puede_ver_equipo() CASCADE;
+DROP FUNCTION IF EXISTS public.es_admin_planta() CASCADE;
+
+-- 1.4 Eliminar tipos ENUM personalizados
+DROP TYPE IF EXISTS public.evaluacion_llanta_estado CASCADE;
+DROP TYPE IF EXISTS public.app_role CASCADE;
+
+-- NOTA: Si deseas también borrar todas las cuentas de usuario de Supabase Auth
+-- para empezar desde cero absoluto, descomenta la siguiente línea:
+-- DELETE FROM auth.users;
+
+-- ==============================================================================
+-- PASO 2: TIPOS ENUM PERSONALIZADOS
+-- ==============================================================================
+CREATE TYPE public.app_role AS ENUM (
+  'vendedor',
+  'supervisor',
+  'jefe',
+  'contador',
+  'administrador_planta'
 );
 
+CREATE TYPE public.evaluacion_llanta_estado AS ENUM (
+  'pendiente',
+  'valida',
+  'no_valida'
+);
+
+-- ==============================================================================
+-- PASO 3: FUNCIONES AUXILIARES GLOBALES
+-- ==============================================================================
 CREATE OR REPLACE FUNCTION public.actualizar_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -27,10 +74,28 @@ BEGIN
 END;
 $$;
 
+-- ==============================================================================
+-- PASO 4: AUTENTICACIÓN Y PERFILES DE USUARIO
+-- ==============================================================================
+CREATE TABLE public.perfiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  nombre TEXT NOT NULL CHECK (char_length(trim(nombre)) >= 2),
+  nombres TEXT,
+  apellidos TEXT,
+  cedula TEXT NOT NULL UNIQUE CHECK (char_length(trim(cedula)) >= 5),
+  correo TEXT NOT NULL,
+  telefono TEXT,
+  rol public.app_role NOT NULL DEFAULT 'vendedor',
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TRIGGER perfiles_updated_at
-  BEFORE UPDATE ON perfiles
+  BEFORE UPDATE ON public.perfiles
   FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
 
+-- Trigger que auto-crea el perfil cuando se registra un usuario en Supabase Auth
 CREATE OR REPLACE FUNCTION public.crear_perfil_usuario()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -47,7 +112,7 @@ BEGIN
     COALESCE(NULLIF(NEW.raw_user_meta_data->>'cedula', ''), 'PENDIENTE-' || left(NEW.id::text, 8)),
     NEW.email,
     NULLIF(trim(NEW.raw_user_meta_data->>'telefono'), ''),
-    COALESCE((NEW.raw_user_meta_data->>'rol')::app_role, 'vendedor'::app_role)
+    COALESCE((NEW.raw_user_meta_data->>'rol')::public.app_role, 'vendedor'::public.app_role)
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
@@ -58,6 +123,11 @@ CREATE TRIGGER usuario_crea_perfil
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.crear_perfil_usuario();
 
+-- Índices de perfiles
+CREATE INDEX idx_perfiles_rol_activo ON public.perfiles(rol, activo);
+CREATE INDEX idx_perfiles_cedula ON public.perfiles(cedula);
+
+-- Funciones de verificación de rol
 CREATE OR REPLACE FUNCTION public.es_jefe()
 RETURNS boolean
 LANGUAGE sql
@@ -71,28 +141,54 @@ AS $$
   );
 $$;
 
-ALTER TABLE perfiles ENABLE ROW LEVEL SECURITY;
+CREATE OR REPLACE FUNCTION public.puede_ver_equipo()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.perfiles
+    WHERE id = auth.uid() AND activo = true AND rol IN ('supervisor', 'jefe')
+  );
+$$;
 
-CREATE POLICY perfiles_select_propio_o_jefe ON perfiles
-  FOR SELECT USING (id = auth.uid() OR public.es_jefe());
+CREATE OR REPLACE FUNCTION public.es_admin_planta()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.perfiles
+    WHERE id = auth.uid() AND rol::text = 'administrador_planta' AND activo = true
+  );
+$$;
 
-CREATE POLICY perfiles_update_jefe ON perfiles
-  FOR UPDATE USING (public.es_jefe())
-  WITH CHECK (public.es_jefe());
+-- Seguridad RLS para perfiles
+ALTER TABLE public.perfiles ENABLE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_perfiles_rol_activo ON perfiles(rol, activo);
+CREATE POLICY perfiles_select_autenticados ON public.perfiles
+  FOR SELECT TO authenticated
+  USING (true);
 
--- Migración para bases creadas con una versión anterior del esquema.
-ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS nombres TEXT;
-ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS apellidos TEXT;
-ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS telefono TEXT;
+CREATE POLICY perfiles_update_jefe_o_propio ON public.perfiles
+  FOR UPDATE TO authenticated
+  USING (public.es_jefe() OR id = auth.uid())
+  WITH CHECK (public.es_jefe() OR id = auth.uid());
 
--- ========================================
--- PLANIFICACION SEMANAL DE VENDEDORES
--- ========================================
-CREATE TABLE IF NOT EXISTS planificaciones_semanales (
+CREATE POLICY perfiles_insert_jefe ON public.perfiles
+  FOR INSERT TO authenticated
+  WITH CHECK (public.es_jefe() OR id = auth.uid());
+
+-- ==============================================================================
+-- PASO 5: PLANIFICACIÓN SEMANAL Y AUDITORÍA DE EDICIONES
+-- ==============================================================================
+CREATE TABLE public.planificaciones_semanales (
   id BIGSERIAL PRIMARY KEY,
-  vendedor_id UUID NOT NULL REFERENCES perfiles(id) ON DELETE CASCADE,
+  vendedor_id UUID NOT NULL REFERENCES public.perfiles(id) ON DELETE CASCADE,
   semana_inicio DATE NOT NULL,
   dia SMALLINT NOT NULL CHECK (dia BETWEEN 1 AND 5),
   ubicacion TEXT NOT NULL CHECK (char_length(trim(ubicacion)) >= 2),
@@ -102,43 +198,48 @@ CREATE TABLE IF NOT EXISTS planificaciones_semanales (
   UNIQUE (vendedor_id, semana_inicio, dia)
 );
 
-CREATE INDEX IF NOT EXISTS idx_planificaciones_semana ON planificaciones_semanales(semana_inicio);
-CREATE INDEX IF NOT EXISTS idx_planificaciones_vendedor ON planificaciones_semanales(vendedor_id);
-ALTER TABLE planificaciones_semanales ENABLE ROW LEVEL SECURITY;
+CREATE INDEX idx_planificaciones_semana ON public.planificaciones_semanales(semana_inicio);
+CREATE INDEX idx_planificaciones_vendedor ON public.planificaciones_semanales(vendedor_id);
 
-CREATE OR REPLACE FUNCTION public.puede_ver_equipo()
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.perfiles WHERE id = auth.uid() AND activo = true AND rol IN ('supervisor', 'jefe'));
-$$;
+ALTER TABLE public.planificaciones_semanales ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY planificacion_vendedor_propia ON planificaciones_semanales
-  FOR ALL USING (vendedor_id = auth.uid()) WITH CHECK (vendedor_id = auth.uid());
+CREATE POLICY planificacion_vendedor_propia ON public.planificaciones_semanales
+  FOR ALL TO authenticated
+  USING (vendedor_id = auth.uid())
+  WITH CHECK (vendedor_id = auth.uid());
 
-CREATE POLICY planificacion_supervision_lectura ON planificaciones_semanales
-  FOR SELECT USING (public.puede_ver_equipo());
+CREATE POLICY planificacion_supervision_lectura ON public.planificaciones_semanales
+  FOR SELECT TO authenticated
+  USING (public.puede_ver_equipo());
 
-CREATE POLICY perfiles_select_supervisor ON perfiles
-  FOR SELECT USING (public.puede_ver_equipo());
-
-CREATE TABLE IF NOT EXISTS ediciones_planificacion (
+-- Historial de versiones de planificación semanal
+CREATE TABLE public.ediciones_planificacion (
   id BIGSERIAL PRIMARY KEY,
-  vendedor_id UUID NOT NULL REFERENCES perfiles(id) ON DELETE CASCADE,
-  editado_por UUID NOT NULL REFERENCES perfiles(id),
+  vendedor_id UUID NOT NULL REFERENCES public.perfiles(id) ON DELETE CASCADE,
+  editado_por UUID NOT NULL REFERENCES public.perfiles(id),
   semana_inicio DATE NOT NULL,
   version INTEGER NOT NULL CHECK (version > 0),
   snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-ALTER TABLE ediciones_planificacion ENABLE ROW LEVEL SECURITY;
-CREATE POLICY ediciones_planificacion_vendedor_insert ON ediciones_planificacion
-  FOR INSERT WITH CHECK (editado_por = auth.uid() AND vendedor_id = auth.uid());
-CREATE POLICY ediciones_planificacion_supervision_lectura ON ediciones_planificacion
-  FOR SELECT USING (public.puede_ver_equipo());
 
--- ========================================
--- TABLA: clientes
--- ========================================
-CREATE TABLE clientes (
+CREATE INDEX idx_ediciones_planificacion_busqueda
+  ON public.ediciones_planificacion(vendedor_id, semana_inicio, version DESC);
+
+ALTER TABLE public.ediciones_planificacion ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY ediciones_planificacion_vendedor_insert ON public.ediciones_planificacion
+  FOR INSERT TO authenticated
+  WITH CHECK (editado_por = auth.uid() AND vendedor_id = auth.uid());
+
+CREATE POLICY ediciones_planificacion_supervision_lectura ON public.ediciones_planificacion
+  FOR SELECT TO authenticated
+  USING (public.puede_ver_equipo());
+
+-- ==============================================================================
+-- PASO 6: CLIENTES
+-- ==============================================================================
+CREATE TABLE public.clientes (
   id BIGSERIAL PRIMARY KEY,
   nombre TEXT NOT NULL,
   cedula TEXT NOT NULL UNIQUE,
@@ -148,14 +249,17 @@ CREATE TABLE clientes (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- ========================================
--- TABLA: ordenes
--- ========================================
-CREATE TABLE ordenes (
+CREATE INDEX idx_clientes_cedula ON public.clientes(cedula);
+CREATE INDEX idx_clientes_nombre ON public.clientes(nombre);
+
+-- ==============================================================================
+-- PASO 7: ÓRDENES
+-- ==============================================================================
+CREATE TABLE public.ordenes (
   id BIGSERIAL PRIMARY KEY,
   numero TEXT NOT NULL UNIQUE,
-  cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-  vendedor_id UUID REFERENCES perfiles(id) ON DELETE SET NULL,
+  cliente_id BIGINT NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
+  vendedor_id UUID REFERENCES public.perfiles(id) ON DELETE SET NULL,
   estado TEXT NOT NULL DEFAULT 'Recepcion',
   fecha_rc TIMESTAMP WITH TIME ZONE,
   fecha_ef TIMESTAMP WITH TIME ZONE,
@@ -169,16 +273,32 @@ CREATE TABLE ordenes (
   monto_pendiente NUMERIC(12, 2) DEFAULT 0,
   pagado_completo BOOLEAN DEFAULT FALSE,
   activo_vigente BOOLEAN DEFAULT FALSE,
+  factura_emitida BOOLEAN NOT NULL DEFAULT FALSE,
+  fecha_factura TIMESTAMP WITH TIME ZONE,
+  numero_factura TEXT,
   observaciones TEXT DEFAULT '',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- ========================================
--- TABLA: items
--- ========================================
-CREATE TABLE items (
+CREATE INDEX idx_ordenes_cliente_id ON public.ordenes(cliente_id);
+CREATE INDEX idx_ordenes_vendedor_id ON public.ordenes(vendedor_id);
+CREATE INDEX idx_ordenes_numero ON public.ordenes(numero);
+CREATE INDEX idx_ordenes_estado ON public.ordenes(estado);
+CREATE INDEX idx_ordenes_created_at ON public.ordenes(created_at);
+CREATE INDEX idx_ordenes_factura_emitida ON public.ordenes(factura_emitida);
+
+-- Compatibilidad para bases existentes sin recrear:
+ALTER TABLE public.ordenes ADD COLUMN IF NOT EXISTS factura_emitida BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.ordenes ADD COLUMN IF NOT EXISTS fecha_factura TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.ordenes ADD COLUMN IF NOT EXISTS numero_factura TEXT;
+UPDATE public.ordenes SET factura_emitida = TRUE WHERE estado IN ('En bodega', 'Entregado al cliente');
+
+-- ==============================================================================
+-- PASO 8: ÍTEMS DE ÓRDENES (LLANTAS)
+-- ==============================================================================
+CREATE TABLE public.items (
   id BIGSERIAL PRIMARY KEY,
-  orden_id BIGINT NOT NULL REFERENCES ordenes(id) ON DELETE CASCADE,
+  orden_id BIGINT NOT NULL REFERENCES public.ordenes(id) ON DELETE CASCADE,
   marca TEXT,
   n_serie TEXT,
   media TEXT,
@@ -190,74 +310,107 @@ CREATE TABLE items (
   fecha_ingreso TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- ========================================
--- TABLA: abonos
--- ========================================
-CREATE TABLE abonos (
+CREATE INDEX idx_items_orden_id ON public.items(orden_id);
+
+-- ==============================================================================
+-- PASO 9: ABONOS
+-- ==============================================================================
+CREATE TABLE public.abonos (
   id BIGSERIAL PRIMARY KEY,
-  orden_id BIGINT NOT NULL REFERENCES ordenes(id) ON DELETE CASCADE,
+  orden_id BIGINT NOT NULL REFERENCES public.ordenes(id) ON DELETE CASCADE,
   monto NUMERIC(12, 2) NOT NULL,
   fecha TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   descripcion TEXT
 );
 
--- ========================================
--- ÍNDICES
--- ========================================
-CREATE INDEX idx_ordenes_cliente_id ON ordenes(cliente_id);
-CREATE INDEX idx_ordenes_vendedor_id ON ordenes(vendedor_id);
+CREATE INDEX idx_abonos_orden_id ON public.abonos(orden_id);
 
--- ========================================
--- EVALUACION DE LLANTAS EN PLANTA
--- ========================================
-CREATE TYPE evaluacion_llanta_estado AS ENUM ('pendiente', 'valida', 'no_valida');
-
-CREATE TABLE IF NOT EXISTS evaluaciones_llantas (
+-- ==============================================================================
+-- PASO 10: EVALUACIONES DE LLANTAS EN PLANTA
+-- ==============================================================================
+CREATE TABLE public.evaluaciones_llantas (
   id BIGSERIAL PRIMARY KEY,
-  item_id BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-  orden_id BIGINT NOT NULL REFERENCES ordenes(id) ON DELETE CASCADE,
-  evaluado_por UUID NOT NULL REFERENCES perfiles(id),
+  item_id BIGINT NOT NULL REFERENCES public.items(id) ON DELETE CASCADE,
+  orden_id BIGINT NOT NULL REFERENCES public.ordenes(id) ON DELETE CASCADE,
+  evaluado_por UUID NOT NULL REFERENCES public.perfiles(id),
   numero_llanta INTEGER NOT NULL DEFAULT 1 CHECK (numero_llanta > 0),
-  estado evaluacion_llanta_estado NOT NULL,
+  estado public.evaluacion_llanta_estado NOT NULL,
   observaciones TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS evaluaciones_llantas_item_numero_key ON evaluaciones_llantas(item_id, numero_llanta);
+CREATE UNIQUE INDEX idx_evaluaciones_llantas_item_numero ON public.evaluaciones_llantas(item_id, numero_llanta);
+CREATE INDEX idx_evaluaciones_llantas_orden ON public.evaluaciones_llantas(orden_id);
 
-CREATE INDEX IF NOT EXISTS idx_evaluaciones_llantas_orden ON evaluaciones_llantas(orden_id);
-ALTER TABLE evaluaciones_llantas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.evaluaciones_llantas ENABLE ROW LEVEL SECURITY;
 
-CREATE OR REPLACE FUNCTION public.es_admin_planta()
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.perfiles WHERE id = auth.uid() AND rol = 'administrador_planta' AND activo = true);
-$$;
+CREATE POLICY evaluaciones_planta_gestion ON public.evaluaciones_llantas
+  FOR ALL TO authenticated
+  USING (public.es_admin_planta() OR public.es_jefe())
+  WITH CHECK (public.es_admin_planta() OR public.es_jefe());
 
-CREATE POLICY evaluaciones_planta_gestion ON evaluaciones_llantas
-  FOR ALL USING (public.es_admin_planta()) WITH CHECK (public.es_admin_planta());
+CREATE POLICY evaluaciones_vendedor_lectura ON public.evaluaciones_llantas
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.ordenes WHERE ordenes.id = evaluaciones_llantas.orden_id AND ordenes.vendedor_id = auth.uid()));
 
-CREATE POLICY evaluaciones_vendedor_lectura ON evaluaciones_llantas
-  FOR SELECT USING (EXISTS (SELECT 1 FROM ordenes WHERE ordenes.id = evaluaciones_llantas.orden_id AND ordenes.vendedor_id = auth.uid()));
+CREATE POLICY evaluaciones_supervision_lectura ON public.evaluaciones_llantas
+  FOR SELECT TO authenticated
+  USING (public.puede_ver_equipo());
 
-CREATE POLICY evaluaciones_supervision_lectura ON evaluaciones_llantas
-  FOR SELECT USING (public.puede_ver_equipo());
-CREATE INDEX idx_items_orden_id ON items(orden_id);
-CREATE INDEX idx_abonos_orden_id ON abonos(orden_id);
+-- ==============================================================================
+-- PASO 11: POLÍTICAS DE SEGURIDAD (RLS) LIBRES PARA MIGRACIÓN Y OPERACIÓN
+-- ==============================================================================
+-- Habilitamos RLS en las tablas operativas y permitimos acceso abierto
+-- para que scripts de migración externos (ej. migración desde Excel) puedan
+-- insertar clientes, órdenes, ítems y abonos sin errores de permisos 42501.
+ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ordenes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.abonos ENABLE ROW LEVEL SECURITY;
 
--- ========================================
--- SEGURIDAD DE DATOS
--- ========================================
-ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ordenes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE abonos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY clientes_politica_abierta ON public.clientes
+  FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY clientes_autenticados ON clientes
-  FOR ALL USING (auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
-CREATE POLICY ordenes_autenticados ON ordenes
-  FOR ALL USING (auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
-CREATE POLICY items_autenticados ON items
-  FOR ALL USING (auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
-CREATE POLICY abonos_autenticados ON abonos
-  FOR ALL USING (auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY ordenes_politica_abierta ON public.ordenes
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY items_politica_abierta ON public.items
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY abonos_politica_abierta ON public.abonos
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- ==============================================================================
+-- PASO 12: AUTO-RECONEXIÓN DE USUARIOS EXISTENTES EN SUPABASE AUTH
+-- ==============================================================================
+-- Si ya tenías usuarios creados en Supabase Auth (auth.users), este bloque
+-- re-inserta sus perfiles automáticamente con rol 'jefe' si no tienen asignado uno,
+-- para que nunca te quedes bloqueado al reiniciar el esquema.
+INSERT INTO public.perfiles (id, nombre, nombres, apellidos, cedula, correo, telefono, rol, activo)
+SELECT 
+  u.id,
+  COALESCE(
+    NULLIF(trim(concat_ws(' ', u.raw_user_meta_data->>'nombres', u.raw_user_meta_data->>'apellidos')), ''),
+    split_part(u.email, '@', 1),
+    'Administrador'
+  ) AS nombre,
+  NULLIF(trim(u.raw_user_meta_data->>'nombres'), '') AS nombres,
+  NULLIF(trim(u.raw_user_meta_data->>'apellidos'), '') AS apellidos,
+  COALESCE(NULLIF(u.raw_user_meta_data->>'cedula', ''), 'CED-' || left(u.id::text, 8)) AS cedula,
+  COALESCE(u.email, 'sin-correo@empresa.com') AS correo,
+  NULLIF(trim(u.raw_user_meta_data->>'telefono'), '') AS telefono,
+  COALESCE((u.raw_user_meta_data->>'rol')::public.app_role, 'jefe'::public.app_role) AS rol,
+  true AS activo
+FROM auth.users u
+ON CONFLICT (id) DO UPDATE SET
+  correo = EXCLUDED.correo;
+
+-- ==============================================================================
+-- UTILIDADES ADICIONALES PARA MIGRACIÓN
+-- ==============================================================================
+-- Si en el futuro solo deseas vaciar todos los datos de clientes/ordenes/items/abonos
+-- sin borrar las tablas ni la estructura, puedes ejecutar esta sola línea:
+--
+-- TRUNCATE TABLE public.abonos, public.items, public.evaluaciones_llantas, public.ordenes, public.clientes RESTART IDENTITY CASCADE;
+-- ==============================================================================

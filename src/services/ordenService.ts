@@ -215,6 +215,50 @@ export const ordenService = {
     } as Orden
   },
 
+  async emitirFactura(id: number, numeroFactura?: string): Promise<Orden> {
+    const { data: userData } = await supabase.auth.getUser()
+    const { data: perfil } = userData.user ? await supabase.from('perfiles').select('rol, activo').eq('id', userData.user.id).single() : { data: null }
+    if (perfil?.rol !== 'contador' && perfil?.rol !== 'jefe') {
+      throw new Error('Solo el rol contadora o jefe puede generar la factura.')
+    }
+
+    const { data: updated, error } = await supabase
+      .from('ordenes')
+      .update({
+        factura_emitida: true,
+        fecha_factura: new Date().toISOString(),
+        numero_factura: numeroFactura ? numeroFactura.trim() : null,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    invalidarCacheOrdenes()
+
+    const [itemsRes, abonosRes, clienteRes] = await Promise.all([
+      supabase.from('items').select('*').eq('orden_id', id),
+      supabase.from('abonos').select('monto').eq('orden_id', id),
+      supabase.from('clientes').select('nombre').eq('id', updated.cliente_id).single(),
+    ])
+
+    const items = itemsRes.data || []
+    const totalAbonos = (abonosRes.data || []).reduce((s, a) => s + Number(a.monto), 0)
+    const itemsValidos = items.filter((it: any) => !it.rechazo)
+    const monto_total = Math.round(itemsValidos.reduce((s: number, it: any) => s + (it.cantidad * Number(it.valor_unitario)), 0) * 100) / 100
+    const monto_pendiente = Math.round((monto_total - totalAbonos) * 100) / 100
+
+    return {
+      ...updated,
+      cliente_nombre: clienteRes.data?.nombre || null,
+      monto_total,
+      monto_abonado: totalAbonos,
+      monto_pendiente,
+      pagado_completo: monto_pendiente <= 0 && monto_total > 0,
+      items,
+    } as Orden
+  },
+
   async reasignarVendedorMasivo(viejoVendedorId: string, nuevoVendedorId: string): Promise<void> {
     const { error } = await supabase
       .from('ordenes')

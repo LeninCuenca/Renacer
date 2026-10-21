@@ -4,6 +4,7 @@ import { ESTADOS, TIPOS_PAGO, diasDeCredito, calcularFechaVencimiento } from '..
 import { ordenService } from '../services/ordenService'
 import { abonoService } from '../services/abonoService'
 import { authService } from '../services/authService'
+import { reporteService } from '../services/reporteService'
 import EstadoBadge from '../components/EstadoBadge'
 import PagoRow from '../components/ui/PagoRow'
 import { CalendarIcon } from '../components/icons'
@@ -23,7 +24,26 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
   const [reasignando, setReasignando] = useState(false)
   const [selectedReasignarId, setSelectedReasignarId] = useState<string>('')
   const [confirmCancelar, setConfirmCancelar] = useState(false)
+  const [numeroFacturaInput, setNumeroFacturaInput] = useState(ordenInicial.numero_factura || '')
+  const [generandoFactura, setGenerandoFactura] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
+
+  const generarFactura = async () => {
+    setGenerandoFactura(true)
+    setMsg(null)
+    try {
+      const actualizada = await ordenService.emitirFactura(orden.id, numeroFacturaInput)
+      setOrden(actualizada)
+      onOrdenActualizada(actualizada)
+      setMsgType('success')
+      setMsg('✓ Factura generada correctamente. La orden ya puede ser enviada a Bodega o entregada al cliente.')
+    } catch (err: any) {
+      setMsgType('error')
+      setMsg(err.message || 'Error al generar la factura')
+    } finally {
+      setGenerandoFactura(false)
+    }
+  }
 
   // Cargar historial de abonos
   const cargarAbonos = async () => {
@@ -42,10 +62,8 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
     }
   }, [rol])
 
-  const idxActual = ESTADOS.indexOf(orden.estado)
-  const estadoSiguiente = idxActual < ESTADOS.length - 1 ? ESTADOS[idxActual + 1] : null
-  const puedeEntregar = orden.estado === 'En bodega' && orden.pagado_completo
-  const bloqueadoPorPago = orden.estado === 'En bodega' && !orden.pagado_completo
+  const puedeEntregar = (orden.estado === 'En bodega' || orden.estado === 'Retorno de fabrica') && orden.pagado_completo
+  const bloqueadoPorPago = (orden.estado === 'En bodega' || orden.estado === 'Retorno de fabrica') && !orden.pagado_completo
   const esperandoPlanta = orden.estado === 'Envio a fabrica' && rol !== 'administrador_planta'
 
   const cancelarOrden = async () => {
@@ -262,25 +280,95 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
         {/* Trazabilidad */}
         {rol !== 'contador' && (
           <>
-            <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Trazabilidad (secuencial)</h4>
-            <div className="space-y-1">
-              {ESTADOS.map((e, i) => {
-                const fecha = i === 0 ? orden.fecha_rc : i === 1 ? orden.fecha_ef : i === 2 ? orden.fecha_rf : i === 3 ? orden.fecha_bodega : orden.fecha_ec
-                const completado = i <= idxActual
+            <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Trazabilidad operativa</h4>
+            <div className="space-y-1.5">
+              {/* Paso 1: Recepción */}
+              {(() => {
+                const completado = ['Recepcion', 'Envio a fabrica', 'Retorno de fabrica', 'En bodega', 'Entregado al cliente'].includes(orden.estado)
                 return (
-                  <div key={e} className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${completado ? 'bg-green-50' : 'bg-gray-50'}`}>
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${completado ? 'bg-green-50' : 'bg-gray-50'}`}>
                     <div className="flex items-center gap-2">
                       <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${completado ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'}`}>
-                        {completado ? '✓' : i + 1}
+                        {completado ? '✓' : '1'}
                       </span>
-                      <span className={completado ? 'font-bold text-green-700' : 'text-gray-400'}>{e}</span>
+                      <span className={completado ? 'font-bold text-green-700' : 'text-gray-400'}>Recepción</span>
                     </div>
                     <span className="text-xs text-navy-300">
-                      {fecha ? new Date(fecha).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'}
+                      {orden.fecha_rc ? new Date(orden.fecha_rc).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'}
                     </span>
                   </div>
                 )
-              })}
+              })()}
+
+              {/* Paso 2: Envío a fábrica */}
+              {(() => {
+                const completado = ['Envio a fabrica', 'Retorno de fabrica', 'En bodega', 'Entregado al cliente'].includes(orden.estado)
+                return (
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${completado ? 'bg-green-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${completado ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'}`}>
+                        {completado ? '✓' : '2'}
+                      </span>
+                      <span className={completado ? 'font-bold text-green-700' : 'text-gray-400'}>Envío a fábrica</span>
+                    </div>
+                    <span className="text-xs text-navy-300">
+                      {orden.fecha_ef ? new Date(orden.fecha_ef).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'}
+                    </span>
+                  </div>
+                )
+              })()}
+
+              {/* Paso 3: Retorno de fábrica */}
+              {(() => {
+                const completado = ['Retorno de fabrica', 'En bodega', 'Entregado al cliente'].includes(orden.estado)
+                return (
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${completado ? 'bg-green-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${completado ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'}`}>
+                        {completado ? '✓' : '3'}
+                      </span>
+                      <span className={completado ? 'font-bold text-green-700' : 'text-gray-400'}>Retorno de fábrica</span>
+                    </div>
+                    <span className="text-xs text-navy-300">
+                      {orden.fecha_rf ? new Date(orden.fecha_rf).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'}
+                    </span>
+                  </div>
+                )
+              })()}
+
+              {/* Paso 4: Bodega o Entregado al cliente (Unificado) */}
+              {(() => {
+                const esEntregado = orden.estado === 'Entregado al cliente'
+                const esBodega = orden.estado === 'En bodega'
+                const paso4Listo = esEntregado || esBodega
+
+                let etiqueta = 'Bodega o Entrega al cliente'
+                let fechaTexto = '—'
+
+                if (esEntregado) {
+                  etiqueta = orden.fecha_bodega ? 'Entregado al cliente (previo bodega)' : 'Entregado al cliente'
+                  fechaTexto = orden.fecha_ec ? new Date(orden.fecha_ec).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'
+                } else if (esBodega) {
+                  etiqueta = 'En bodega (listo para entrega)'
+                  fechaTexto = orden.fecha_bodega ? new Date(orden.fecha_bodega).toLocaleDateString('es-EC', { dateStyle: 'short' }) : '—'
+                }
+
+                return (
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${paso4Listo ? 'bg-green-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${paso4Listo ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'}`}>
+                        {paso4Listo ? '✓' : '4'}
+                      </span>
+                      <span className={paso4Listo ? 'font-bold text-green-700' : 'text-gray-400'}>
+                        {etiqueta}
+                      </span>
+                    </div>
+                    <span className="text-xs text-navy-300">
+                      {fechaTexto}
+                    </span>
+                  </div>
+                )
+              })()}
             </div>
           </>
         )}
@@ -289,24 +377,113 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
         {rol !== 'contador' && (
           <>
             <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Avanzar estado operativo</h4>
-            {esperandoPlanta ? (
-              <p className="rounded-lg bg-amber-50 px-3 py-3 text-xs font-medium text-amber-700">Esta orden está en fábrica. El administrador de planta debe evaluar cada llanta y marcar el retorno de fábrica.</p>
-            ) : estadoSiguiente ? (
+            {orden.estado === 'Cancelada' ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">Orden cancelada ✕</p>
+            ) : esperandoPlanta ? (
+              <p className="rounded-lg bg-amber-50 px-3 py-3 text-xs font-medium text-amber-700">
+                Esta orden está en fábrica. El administrador de planta debe evaluar cada llanta y marcar el retorno de fábrica.
+              </p>
+            ) : orden.estado === 'Recepcion' ? (
+              <button
+                onClick={() => cambiarEstado('Envio a fabrica')}
+                disabled={saving}
+                className="w-full rounded-lg border border-primary-400 bg-primary-400 px-4 py-3 text-sm font-bold text-navy-500 hover:bg-primary-300 transition"
+              >
+                {saving ? 'Procesando...' : '→ Avanzar a: Envio a fabrica'}
+              </button>
+            ) : orden.estado === 'Retorno de fabrica' ? (
+              <div className="space-y-3">
+                {!orden.factura_emitida ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">⏳</span>
+                      <span className="font-bold text-xs text-amber-800">Pendiente de Facturación</span>
+                    </div>
+                    <p className="text-xs text-amber-700">
+                      Las llantas retornaron de fábrica. La <strong>contadora debe generar la factura</strong> antes de que puedas enviar esta orden a Bodega o entregarla al cliente.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 border border-green-200 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-green-700">✓ Factura generada por contabilidad</span>
+                        {orden.numero_factura && <span className="font-normal text-green-600">(Nº: {orden.numero_factura})</span>}
+                      </div>
+                      <span className="text-[11px] text-navy-300">
+                        {orden.fecha_factura ? new Date(orden.fecha_factura).toLocaleDateString('es-EC', { dateStyle: 'short' }) : ''}
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-semibold text-navy-400">
+                      Factura lista. Selecciona el siguiente paso:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {/* Opción A: Pasar a Bodega */}
+                      <button
+                        onClick={() => cambiarEstado('En bodega')}
+                        disabled={saving}
+                        className="flex flex-col items-center justify-center rounded-xl border border-navy-200 bg-navy-50/70 p-3 text-center transition hover:bg-navy-100 hover:border-navy-300 disabled:opacity-50"
+                      >
+                        <span className="text-xl mb-1">📦</span>
+                        <span className="text-xs font-bold text-navy-700">Pasar a Bodega</span>
+                        <span className="text-[10px] text-navy-400">Almacenar temporalmente</span>
+                      </button>
+
+                      {/* Opción B: Entregar directamente al Cliente */}
+                      <button
+                        onClick={() => !bloqueadoPorPago && cambiarEstado('Entregado al cliente')}
+                        disabled={saving || bloqueadoPorPago}
+                        className={`flex flex-col items-center justify-center rounded-xl border p-3 text-center transition ${
+                          bloqueadoPorPago
+                            ? 'border-red-200 bg-red-50/70 opacity-60 cursor-not-allowed'
+                            : 'border-green-300 bg-green-50 hover:bg-green-100'
+                        }`}
+                      >
+                        <span className="text-xl mb-1">🤝</span>
+                        <span className={`text-xs font-bold ${bloqueadoPorPago ? 'text-red-500' : 'text-green-700'}`}>
+                          Entregar al Cliente
+                        </span>
+                        <span className="text-[10px] text-navy-400">Entrega directa sin bodega</span>
+                      </button>
+                    </div>
+
+                    {bloqueadoPorPago && (
+                      <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+                        Para entregar directamente al cliente el pago debe estar completado. Pendiente: ${orden.monto_pendiente.toFixed(2)} (Puedes pasar la orden a Bodega mientras se realiza el cobro).
+                      </p>
+                    )}
+                    {puedeEntregar && (orden.tipo_pago === 'Cheque' || orden.tipo_pago === 'Transferencia') && (
+                      <p className="mt-1 rounded-lg bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
+                        Pago verificado ({orden.tipo_pago}). Listo para entregar directamente al cliente.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : orden.estado === 'En bodega' ? (
               <div>
-                <button onClick={() => cambiarEstado(estadoSiguiente)} disabled={saving}
+                <p className="mb-2 text-xs font-medium text-navy-400">
+                  La orden está en bodega. Puedes proceder a entregarla al cliente:
+                </p>
+                <button
+                  onClick={() => !bloqueadoPorPago && cambiarEstado('Entregado al cliente')}
+                  disabled={saving || bloqueadoPorPago}
                   className={`w-full rounded-lg border px-4 py-3 text-sm font-bold transition ${
-                    estadoSiguiente === 'Entregado al cliente' && bloqueadoPorPago
+                    bloqueadoPorPago
                       ? 'border-red-200 bg-red-50 text-red-400 cursor-not-allowed'
-                      : 'border-primary-400 bg-primary-400 text-navy-500 hover:bg-primary-300'
-                  }`}>
-                  {saving ? 'Procesando...' : `→ Avanzar a: ${estadoSiguiente}`}
+                      : 'border-green-400 bg-green-500 text-white hover:bg-green-600'
+                  }`}
+                >
+                  {saving ? 'Procesando...' : '🤝 Entregar al Cliente'}
                 </button>
-                {estadoSiguiente === 'Entregado al cliente' && bloqueadoPorPago && (
+                {bloqueadoPorPago && (
                   <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
-                    No se puede entregar: el pago no esta completado. Pendiente: ${orden.monto_pendiente.toFixed(2)}
+                    No se puede entregar: el pago no está completado. Pendiente: ${orden.monto_pendiente.toFixed(2)}
                   </p>
                 )}
-                {estadoSiguiente === 'Entregado al cliente' && puedeEntregar && (orden.tipo_pago === 'Cheque' || orden.tipo_pago === 'Transferencia') && (
+                {puedeEntregar && (orden.tipo_pago === 'Cheque' || orden.tipo_pago === 'Transferencia') && (
                   <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
                     Pago verificado ({orden.tipo_pago}). Listo para entregar.
                   </p>
@@ -316,6 +493,55 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
               <p className="rounded-lg bg-green-50 px-3 py-2 text-xs font-bold text-green-600">Orden completada ✓</p>
             )}
           </>
+        )}
+
+        {/* Módulo de Facturación (Para Contadora o Jefe) */}
+        {(rol === 'contador' || rol === 'jefe') && (
+          <div className="mt-5 rounded-xl border border-orange-200 bg-orange-50/40 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-orange-700">Módulo de Facturación</h4>
+              {orden.factura_emitida ? (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">Facturada ✓</span>
+              ) : (
+                <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">Por Facturar</span>
+              )}
+            </div>
+
+            {orden.factura_emitida ? (
+              <div className="rounded-lg bg-white p-3 border border-green-200 text-xs space-y-1">
+                <p className="font-bold text-green-700">✓ Factura emitida exitosamente</p>
+                {orden.numero_factura && <p className="text-navy-400">Nº Factura: <span className="font-semibold text-navy-500">{orden.numero_factura}</span></p>}
+                {orden.fecha_factura && <p className="text-[11px] text-navy-300">Fecha: {new Date(orden.fecha_factura).toLocaleString('es-EC')}</p>}
+              </div>
+            ) : orden.estado === 'Retorno de fabrica' ? (
+              <div className="space-y-3">
+                <p className="text-xs text-orange-950 font-medium">
+                  Las llantas están listas en retorno de fábrica. Genera la factura para habilitar que el vendedor pueda enviarla a Bodega o entregarla al cliente:
+                </p>
+                <div>
+                  <label className="block text-[11px] font-semibold text-orange-900 mb-1">Número de Factura (opcional):</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 001-002-000012345"
+                    value={numeroFacturaInput}
+                    onChange={e => setNumeroFacturaInput(e.target.value)}
+                    className="w-full rounded-lg border border-orange-200 bg-white px-3 py-2 text-xs text-navy-500 placeholder:text-navy-200 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                  />
+                </div>
+                <button
+                  onClick={generarFactura}
+                  disabled={saving || generandoFactura}
+                  className="w-full rounded-lg bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600 disabled:opacity-50 shadow-sm"
+                >
+                  {generandoFactura ? 'Generando Factura...' : '🧾 Generar Factura (Habilitar Bodega / Entrega)'}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-navy-400">
+                La facturación se habilita cuando la orden retorna de fábrica. (Estado actual: <strong>{orden.estado}</strong>)
+              </p>
+            )}
+          </div>
         )}
 
         {/* Items */}
@@ -335,10 +561,27 @@ export default function OrdenDetalleModal({ orden: ordenInicial, rol, onOrdenAct
           )
         })}
 
+        {/* Exportar Nota de Entrega */}
+        <div className="mt-4">
+          <button onClick={() => {
+            setSaving(true); setMsg(null);
+            reporteService.exportarNotaEntrega(orden)
+              .then(() => { setMsgType('success'); setMsg('✓ Nota de entrega generada'); })
+              .catch(e => { setMsgType('error'); setMsg(e instanceof Error ? e.message : 'Error al exportar'); })
+              .finally(() => setSaving(false));
+          }} disabled={saving}
+          className="w-full flex items-center justify-center gap-2 rounded-lg border border-navy-500 bg-white px-4 py-2.5 text-sm font-bold text-navy-500 transition hover:bg-navy-50 disabled:opacity-60">
+            Exportar Nota de Entrega (Excel)
+          </button>
+        </div>
+
         {/* Pago */}
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-primary-600">Control de Pago</h4>
         <div className="rounded-lg bg-navy-50 p-4">
-          <PagoRow label="Total (sin rechazados)" value={orden.monto_total} color="text-navy-500" />
+          <PagoRow label="Subtotal (Sin IVA)" value={orden.monto_total / 1.15} color="text-navy-400" />
+          <PagoRow label="IVA (15%)" value={orden.monto_total - (orden.monto_total / 1.15)} color="text-navy-400" />
+          <div className="my-2 border-b border-navy-100" />
+          <PagoRow label="Total a Facturar" value={orden.monto_total} color="text-navy-500" />
           <PagoRow label="Abonado" value={orden.monto_abonado} color="text-green-600" />
           <PagoRow label="Pendiente" value={orden.monto_pendiente} color={orden.monto_pendiente > 0 ? 'text-red-500' : 'text-green-600'} />
         </div>

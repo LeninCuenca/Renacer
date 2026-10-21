@@ -7,22 +7,20 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Node modules
+# Node modules y compilación
 node_modules/
 dist/
 dist-ssr/
+build/
 *.local
 
-# Environment variables
+# Variables de entorno y secretos
 .env
-.env.production
-.env.development
-.env.local
-.env.test.local
-.env.production.local
-.env.development.local
+.env.*
+!.env.example
+!.env.template
 
-# Typescript
+# TypeScript
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 
@@ -30,23 +28,48 @@ tsconfig.tsbuildinfo
 .venv/
 venv/
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 
-# Editor directories and files
+# Supabase
+supabase/.temp/
+supabase/.branches/
+.supabase/
+
+# Editores e IDEs
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea/
-.DS_Store
-Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swo
 
-# Mobile (Capacitor/Android)
+# Mobile (Capacitor / Android / iOS)
 android/.gradle/
 android/app/build/
+android/build/
 android/local.properties
+android/capacitor-cordova-android-plugins/
+android/app/src/main/assets/public/
 ios/App/App/build/
 ios/App/Pods/
 
-# Others
+# Archivos del sistema
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+*~
+
+# Vercel y despliegue
+.vercel/
+
+# Cobertura y testing
 coverage/
 .nyc_output/

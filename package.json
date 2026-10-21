@@ -12,7 +12,8 @@
     "cap:build-android": "npm run build && npx cap add android && npx cap sync",
     "cap:open": "npx cap open android",
     "cap:prepare": "npm run build && npx cap sync",
-    "build:apk": "node scripts/build-apk.mjs"
+    "build:apk": "node scripts/build-apk.mjs",
+    "migrate": "node scripts/migrate_excel.mjs"
   },
   "dependencies": {
     "@capacitor/filesystem": "^8.1.2",

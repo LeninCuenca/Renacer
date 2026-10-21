@@ -21,6 +21,7 @@ import PlantaScreen from './screens/PlantaScreen'
 import PlanificacionScreen from './screens/PlanificacionScreen'
 import PlanificacionesScreen from './screens/PlanificacionesScreen'
 import CarteraScreen from './screens/CarteraScreen'
+import ProduccionScreen from './screens/ProduccionScreen'
 
 // ============================================================
 // App Shell — Header, Navegación y Router de tabs
@@ -52,7 +53,7 @@ export default function App() {
       count += alertas.filter(a => a.porVencer || a.vencido).length
       if (perfil.rol === 'contador') {
         ordenService.getOrdenes().then(ordenes => {
-          const paraFacturar = ordenes.filter(o => o.estado === 'Retorno de fabrica').length
+          const paraFacturar = ordenes.filter(o => o.estado === 'Retorno de fabrica' && !o.factura_emitida).length
           setAlertasCount(count + paraFacturar)
         }).catch(() => setAlertasCount(count))
       } else {
@@ -88,18 +89,16 @@ export default function App() {
                 <BellIcon /> {alertasCount}
               </button>
             )}
-            <div className="rounded-full bg-primary-400 px-3 py-1 text-xs font-bold text-navy-500">
-              {TAB_LABELS[activeTab]}
-            </div>
+
             <span className="hidden text-xs text-navy-100 sm:inline">{navigation.label}</span>
-            <button onClick={() => setChangePasswordOpen(true)} className="text-xs font-semibold text-white underline">Contraseña</button>
+            <button onClick={() => setChangePasswordOpen(true)} className="text-xs font-semibold text-white underline">Mi Perfil</button>
             <button onClick={() => authService.cerrarSesion()} className="text-xs font-semibold text-white underline">Salir</button>
           </div>
         </div>
       </header>
 
       <nav className="sticky top-[57px] z-20 border-b border-navy-100 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl flex-wrap">
+        <div className="mx-auto flex max-w-3xl overflow-x-auto whitespace-nowrap hide-scrollbar">
           {navigation.tabs.map(item => <TabBtn key={item} label={TAB_LABELS[item]} active={activeTab === item} onClick={() => cambiarTab(item)} />)}
         </div>
       </nav>
@@ -117,10 +116,11 @@ export default function App() {
           {activeTab === 'usuarios' && <UsuariosScreen />}
           {activeTab === 'vendedores' && <VendedoresScreen />}
           {activeTab === 'planta' && <PlantaScreen />}
+          {activeTab === 'produccion' && <ProduccionScreen />}
         </div>
       </main>
 
-      {changePasswordOpen && <ChangePasswordScreen onClose={() => setChangePasswordOpen(false)} />}
+      {changePasswordOpen && perfil && <ChangePasswordScreen perfil={perfil} onClose={() => setChangePasswordOpen(false)} />}
 
       <footer className="mx-auto max-w-3xl px-4 pb-8 pt-2 text-center text-xs text-navy-200">
         Renacer · Sistema de registro operativo y control de pagos
